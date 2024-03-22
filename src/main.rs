@@ -71,12 +71,11 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     };
 
+    info!("init_params {:?}", init_params);
     simple_logging::log_to_file(
-        &init_params.initialization_options.log_path,
+        init_params.initialization_options.log_path,
         LevelFilter::Warn,
     )?;
-
-    error!("init_params {:?}", init_params);
 
     let lsp_events = LspEvents::new(gitlab_parser::LSPConfig {
         cache_path: format!("{}/.gitlab-ls/cache/", std::env::var("HOME")?),
@@ -87,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     debug!("initialized");
 
     for msg in &connection.receiver {
-        debug!("receiver message {:?}", msg);
+        info!("receiver message {:?}", msg);
 
         let result = match msg {
             // TODO: implement workspace/didChangeConfiguration
@@ -114,11 +113,11 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
         };
 
-        debug!("got result {:?}", &result);
+        info!("got result {:?}", &result);
 
         let sent = match result {
             Some(LSPResult::Hover(hover_result)) => {
-                debug!("send hover msg: {:?}", hover_result);
+                info!("send hover msg: {:?}", hover_result);
 
                 let msg = Message::Response(Response {
                     id: hover_result.id,

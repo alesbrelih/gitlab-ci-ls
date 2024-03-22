@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 
-use log::{debug, error};
+use log::{debug, error, info};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
@@ -20,8 +20,6 @@ pub struct LspEvents {
 
 impl LspEvents {
     pub fn new(cfg: LSPConfig) -> LspEvents {
-        error!("cfg: {:?}", cfg);
-
         let events = LspEvents {
             cfg,
             store: Mutex::new(HashMap::new()),
@@ -57,16 +55,23 @@ impl LspEvents {
                 _ => continue,
             };
 
+            let mut current_hover = String::new();
             let mut hash = Hash::new();
             hash.insert(node_key, node_value);
 
-            let mut emitter = YamlEmitter::new(&mut hover);
+            let mut emitter = YamlEmitter::new(&mut current_hover);
             emitter.dump(&Yaml::Hash(hash)).unwrap();
 
-            hover = hover.trim_start_matches("---\n").to_string();
-            hover = format!("```yaml \r\n{}\r\n```", hover);
+            current_hover = current_hover.trim_start_matches("---\n").to_string();
+
+            if !hover.is_empty() {
+                hover = format!("{}\r\n--------\r\n", hover);
+            }
+
+            hover = format!("{}{}", hover, current_hover);
         }
 
+        hover = format!("```yaml \r\n{}\r\n```", hover);
         // TODO: support multiple hovers?
 
         Some(LSPResult::Hover(HoverResult {
@@ -143,6 +148,7 @@ impl LspEvents {
         let mut locations: Vec<LSPLocation> = vec![];
 
         for (uri, content) in store.iter() {
+            info!("checking uri {}", uri);
             let documents = match YamlLoader::load_from_str(content) {
                 Ok(d) => d,
                 Err(err) => {
@@ -179,7 +185,8 @@ impl LspEvents {
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let mut store = self.store.lock().unwrap();
 
-        let uri = Url::parse(format!("file:/{}", root_dir).as_str())?;
+        let mut uri = Url::parse(format!("file://{}/", root_dir).as_str())?;
+        info!("uri: {}", &uri);
 
         let list = std::fs::read_dir(root_dir)?;
         let mut root_file: Option<PathBuf> = None;
@@ -192,11 +199,18 @@ impl LspEvents {
         }
 
         let root_file_content = match root_file {
-            Some(root_file) => std::fs::read_to_string(root_file)?,
+            Some(root_file) => {
+                let file_name = root_file.file_name().unwrap().to_str().unwrap();
+                uri = uri.join(file_name)?;
+
+                std::fs::read_to_string(root_file)?
+            }
             _ => {
                 return Err(anyhow::anyhow!("root file missing"));
             }
         };
+
+        info!("URI: {}", &uri);
 
         parse_contents(
             &mut store,

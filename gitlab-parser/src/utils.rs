@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path, sync::MutexGuard};
 
 use git2::{Cred, RemoteCallbacks};
-use log::{debug, error};
+use log::{debug, error, info};
 use lsp_types::Url;
 use yaml_rust::{Yaml, YamlLoader};
 
@@ -86,7 +86,7 @@ fn fetch_remote_files(
 
     // check if we have that reference to repository
     let repo_path = format!("{}{}/{}/", &cache_path, remote_pkg, remote_tag);
-    error!("repo_path: {}", repo_path);
+    info!("repo_path: {}", repo_path);
 
     if !std::path::Path::new(&repo_path).exists() {
         let mut callbacks = RemoteCallbacks::new();
@@ -111,10 +111,10 @@ fn fetch_remote_files(
             }
         };
 
-        error!("got host: {}", host);
+        info!("got git host: {}", host);
 
         let dest = Path::new(repo_path.as_str());
-        error!("dest {:?}", dest);
+        info!("clone dest {:?}", dest);
 
         match builder.clone(format!("{}:{}", host, remote_pkg).as_str(), dest) {
             Ok(repo) => {
@@ -148,7 +148,7 @@ fn fetch_remote_files(
             }
         };
 
-        let uri = match Url::parse(format!("file:/{}", &file_path).as_str()) {
+        let uri = match Url::parse(format!("file://{}", &file_path).as_str()) {
             Ok(uri) => uri,
             Err(err) => {
                 error!("error generating uri; got err {}", err);
