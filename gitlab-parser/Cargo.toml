@@ -1,0 +1,19 @@
+[package]
+name = "gitlab-parser"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+git2 = "0.18.3"
+yaml-rust = "0.4.5"
+log.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+simple-logging.workspace = true
+simple_logger.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
