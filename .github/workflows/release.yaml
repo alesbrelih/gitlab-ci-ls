@@ -69,13 +69,18 @@ jobs:
 
       - name: Download artifacts
         uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
 
       - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./
-          asset_name: ${{ github.run_id }}_${{ github.run_attempt }}_${{ matrix.asset_name }}
-          asset_content_type: application/octet-stream
+        run: |
+          for file in artifacts/*; do
+            echo "Uploading $file"
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.PAT }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "${{ steps.create_release.outputs.upload_url }}?name=$(basename "$file")"
+          done
+        shell: bash
