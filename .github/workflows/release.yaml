@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -19,9 +19,6 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             asset_name: gitlab-ls_mac.tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset_name: gitlab-ls_windows.zip
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -64,10 +61,11 @@ jobs:
           sudo apt-get install gh
 
       - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
 
-          gh auth setup-git -t ${{ secrets.PAT }}
           gh release create $TAG_NAME \
             --title "Release $TAG_NAME" \
             --notes "Release notes for $TAG_NAME" \
@@ -80,6 +78,8 @@ jobs:
           path: artifacts/
 
       - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           for file in artifacts/*; do
