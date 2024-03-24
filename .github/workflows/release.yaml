@@ -77,6 +77,9 @@ jobs:
         with:
           path: artifacts/
 
+      - name: List artifacts
+        run: ls -Rl artifacts/
+
       - name: Upload Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
