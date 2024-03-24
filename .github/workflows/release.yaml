@@ -75,15 +75,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          echo "Listing contents of artifacts/ for debugging:"
-          ls -l artifacts/
-          for file in artifacts/*; do
-            if [ -f "$file" ]; then
-              echo "Uploading $file"
-              gh release upload $TAG_NAME "$file" --clobber
+          for artifact_dir in artifacts/*; do
+            if [ -d "$artifact_dir" ]; then
+              echo "Uploading assets from $artifact_dir"
+              for file in "$artifact_dir"/*; do
+                if [ -f "$file" ]; then
+                  echo "Uploading $file"
+                  gh release upload $TAG_NAME "$file" --clobber
+                else
+                  echo "Skipping $file because it is not a file"
+                fi
+              done
             else
-              echo "Skipping $file because it is not a file"
-              # Additional debug line to help understand what's being skipped
-              ls -ld "$file"
+              echo "Skipping $artifact_dir because it is not a directory"
             fi
           done
