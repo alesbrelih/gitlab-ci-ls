@@ -17,4 +17,33 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - run: cargo build
+      - name: Build
+        run: cargo build --release
+
+      - name: Package the executable
+        run: |
+          mkdir myproject_release
+          cp target/release/myproject myproject_release/
+          tar czvf myproject_release.tar.gz myproject_release
+        shell: bash
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./myproject_release.tar.gz
+          asset_name: myproject_release.tar.gz
+          asset_content_type: application/gzip
