@@ -146,7 +146,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gitlab-lsp"
+name = "gitlab-ls"
 version = "0.1.0"
 dependencies = [
  "anyhow",

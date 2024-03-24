@@ -22,9 +22,9 @@ jobs:
 
       - name: Package the executable
         run: |
-          mkdir myproject_release
-          cp target/release/myproject myproject_release/
-          tar czvf myproject_release.tar.gz myproject_release
+          mkdir gitlab-ls
+          cp target/release/gitlab-ls gitlab-ls/
+          tar czvf gitlab-ls.tar.gz gitlab-ls
         shell: bash
 
       - name: Create Release
@@ -44,6 +44,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./myproject_release.tar.gz
-          asset_name: myproject_release.tar.gz
+          asset_path: ./gitlab-ls.tar.gz
+          asset_name: gitlab-ls.tar.gz
           asset_content_type: application/gzip

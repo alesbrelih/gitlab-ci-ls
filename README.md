@@ -44,7 +44,7 @@ vim.api.nvim_create_autocmd("FileType", {
     end
 
     local client = vim.lsp.start_client({
-      name = "gitlab-lsp",
+      name = "gitlab-ls",
       cmd = { "path-to-gitlab-ls" },
       init_options = {
         cache = "path to cache folder that will hold remote files",

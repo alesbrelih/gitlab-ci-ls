@@ -15,9 +15,9 @@ let client: LanguageClient;
 
 export function activate(_: ExtensionContext) {
   const serverOptions: ServerOptions = {
-    run: { command: "gitlab-lsp" },
+    run: { command: "gitlab-ls" },
     debug: {
-      command: "gitlab-lsp",
+      command: "gitlab-ls",
     },
   };
 
@@ -29,7 +29,7 @@ export function activate(_: ExtensionContext) {
     ],
     initializationOptions: {
       cache: "~/.gitlab-ls/cache/",
-      log_path: "/tmp/gitlab-lsp.log",
+      log_path: "/tmp/gitlab-ls.log",
       package_map: {
         somepackage: "git@host",
       },
