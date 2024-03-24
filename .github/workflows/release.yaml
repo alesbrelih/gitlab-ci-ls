@@ -80,7 +80,7 @@ jobs:
               -X POST \
               -H "Authorization: token ${{ secrets.PAT }}" \
               -H "Content-Type: application/octet-stream" \
-              --data-binary @"$file" \
+              -F "file=@${file}" \
               "${{ steps.create_release.outputs.upload_url }}?name=$(basename "$file")"
           done
         shell: bash
