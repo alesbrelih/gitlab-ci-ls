@@ -85,6 +85,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          for file in artifacts/*; do
-            gh release upload $TAG_NAME "$file" --clobber
-          done
+          if [ -f "$file" ]; then
+              gh release upload $TAG_NAME "$file" --clobber
+            else
+              echo "Skipping $file because it is not a file"
+            fi
