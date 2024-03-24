@@ -79,8 +79,10 @@ jobs:
             curl \
               -X POST \
               -H "Authorization: token ${{ secrets.PAT }}" \
-              -H "Content-Type: application/octet-stream" \
-              -F "file=@${file}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -F "name=$(basename "$file")" \
+              -F "label=$(basename "$file")" \
+              -F "file=@$file" \
               "${{ steps.create_release.outputs.upload_url }}?name=$(basename "$file")"
           done
         shell: bash
