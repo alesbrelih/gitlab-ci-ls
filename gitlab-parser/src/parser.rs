@@ -3,9 +3,9 @@ use std::{collections::HashMap, path::Path};
 use git2::{Cred, RemoteCallbacks};
 use log::{debug, error, info};
 use lsp_types::Url;
-use yaml_rust::{Yaml, YamlLoader};
+use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
-use crate::{GitlabFile, LSPPosition, Range};
+use crate::{GitlabFile, GitlabRootNode, LSPPosition, Range};
 
 pub struct Parser {
     package_map: HashMap<String, String>,
@@ -29,6 +29,22 @@ impl ParserUtils {
             .map_or(line.len(), |index| index + char_index);
 
         Some(&line[start..end])
+    }
+
+    pub fn word_before_cursor(line: &str, char_index: usize) -> &str {
+        if char_index == 0 || char_index > line.len() {
+            return "";
+        }
+
+        let start = line[..char_index]
+            .rfind(|c: char| c.is_whitespace())
+            .map_or(0, |index| index + 1);
+
+        if start == char_index {
+            return "";
+        }
+
+        &line[start..char_index]
     }
 
     pub fn find_position(content: &str, word: &str) -> Option<Range> {
@@ -73,6 +89,40 @@ impl ParserUtils {
 
         None
     }
+
+    fn get_all_root_nodes(content: &str) -> Vec<GitlabRootNode> {
+        let mut nodes: Vec<GitlabRootNode> = vec![];
+
+        let documents = match YamlLoader::load_from_str(content) {
+            Ok(_documents) => _documents,
+            Err(err) => {
+                error!("parsing yaml from: {:?} got: {:?}", content, err);
+
+                return nodes;
+            }
+        };
+
+        let content = &documents[0];
+
+        if let Yaml::Hash(root) = content {
+            for (key, value) in root {
+                let mut description = String::new();
+                let mut hash = Hash::new();
+
+                hash.insert(key.clone(), value.clone());
+
+                let mut emitter = YamlEmitter::new(&mut description);
+                emitter.dump(&Yaml::Hash(hash)).unwrap();
+
+                nodes.push(GitlabRootNode {
+                    key: key.as_str().unwrap().into(),
+                    description,
+                })
+            }
+        }
+
+        nodes
+    }
 }
 
 impl Parser {
@@ -88,17 +138,19 @@ impl Parser {
         uri: &Url,
         content: &str,
         _follow: bool,
-    ) -> Option<Vec<GitlabFile>> {
-        let mut vec: Vec<GitlabFile> = vec![];
+    ) -> Option<(Vec<GitlabFile>, Vec<GitlabRootNode>)> {
+        let mut files: Vec<GitlabFile> = vec![];
+        let mut nodes: Vec<GitlabRootNode> = vec![];
 
-        self.parse_contents_recursive(&mut vec, uri, content, _follow, 0)?;
+        self.parse_contents_recursive(&mut files, &mut nodes, uri, content, _follow, 0)?;
 
-        Some(vec)
+        Some((files, nodes))
     }
 
     fn parse_contents_recursive(
         &self,
         files: &mut Vec<GitlabFile>,
+        nodes: &mut Vec<GitlabRootNode>,
         uri: &lsp_types::Url,
         content: &str,
         _follow: bool,
@@ -114,6 +166,8 @@ impl Parser {
             content: content.into(),
         });
 
+        nodes.append(&mut ParserUtils::get_all_root_nodes(content));
+
         let (_, value) = ParserUtils::get_root_node(content, "include")?;
 
         if let Yaml::Array(includes) = value {
@@ -125,7 +179,13 @@ impl Parser {
 
                     for (key, item_value) in item {
                         if !remote_pkg.is_empty() {
-                            self.fetch_remote_files(files, &remote_pkg, &remote_tag, &remote_files);
+                            self.fetch_remote_files(
+                                files,
+                                nodes,
+                                &remote_pkg,
+                                &remote_tag,
+                                &remote_files,
+                            );
                         }
 
                         if let Yaml::String(key_str) = key {
@@ -139,6 +199,7 @@ impl Parser {
                                         if _follow {
                                             self.parse_contents_recursive(
                                                 files,
+                                                nodes,
                                                 &current_uri,
                                                 &current_content,
                                                 _follow,
@@ -173,7 +234,13 @@ impl Parser {
                     }
 
                     if !remote_pkg.is_empty() {
-                        self.fetch_remote_files(files, &remote_pkg, &remote_tag, &remote_files);
+                        self.fetch_remote_files(
+                            files,
+                            nodes,
+                            &remote_pkg,
+                            &remote_tag,
+                            &remote_files,
+                        );
                     }
                 }
             }
@@ -185,6 +252,7 @@ impl Parser {
     fn fetch_remote_files(
         &self,
         files: &mut Vec<GitlabFile>,
+        nodes: &mut Vec<GitlabRootNode>,
         remote_pkg: &String,
         remote_tag: &String,
         remote_files: &Vec<String>,
@@ -224,10 +292,12 @@ impl Parser {
                 }
             };
 
+            nodes.append(&mut ParserUtils::get_all_root_nodes(content.as_str()));
+
             files.push(GitlabFile {
                 path: uri.as_str().into(),
                 content,
-            })
+            });
         }
     }
 

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    Hover, HoverContents, LocationLink, MarkedString, Position, ServerCapabilities,
-    TextDocumentSyncKind, Url,
+    CompletionItem, CompletionList, Hover, HoverContents, LocationLink, MarkedString, Position,
+    ServerCapabilities, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
@@ -48,6 +48,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         )),
         hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         definition_provider: Some(lsp_types::OneOf::Left(true)),
+        completion_provider: Some(lsp_types::CompletionOptions {
+            resolve_provider: Some(false),
+            trigger_characters: Some(vec![":".to_string(), " ".to_string()]),
+            work_done_progress_options: WorkDoneProgressOptions {
+                work_done_progress: None,
+            },
+            all_commit_characters: None,
+            completion_item: None,
+        }),
 
         ..Default::default()
     })?;
@@ -103,6 +112,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             Message::Request(request) => match request.method.as_str() {
                 "textDocument/hover" => lsp_events.on_hover(request),
                 "textDocument/definition" => lsp_events.on_definition(request),
+                "textDocument/completion" => lsp_events.on_completion(request),
                 "shutdown" => exit(0),
                 method => {
                     warn!("invalid request method: {:?}", method);
@@ -126,6 +136,29 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     result: serde_json::to_value(Hover {
                         contents: HoverContents::Scalar(MarkedString::String(hover_result.content)),
                         range: None,
+                    })
+                    .ok(),
+                    error: None,
+                });
+
+                connection.sender.send(msg)
+            }
+            Some(LSPResult::Completion(completion_result)) => {
+                info!("send completion msg: {:?}", completion_result);
+
+                let msg = Message::Response(Response {
+                    id: completion_result.id,
+                    result: serde_json::to_value(CompletionList {
+                        items: completion_result
+                            .list
+                            .iter()
+                            .map(|c| CompletionItem {
+                                label: c.label.clone(),
+                                detail: Some(c.details.clone()),
+                                ..Default::default()
+                            })
+                            .collect(),
+                        is_incomplete: false,
                     })
                     .ok(),
                     error: None,

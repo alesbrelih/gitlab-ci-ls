@@ -24,6 +24,18 @@ pub struct DefinitionResult {
 }
 
 #[derive(Debug)]
+pub struct CompletionResult {
+    pub id: RequestId,
+    pub list: Vec<LSPCompletion>,
+}
+
+#[derive(Debug)]
+pub struct LSPCompletion {
+    pub label: String,
+    pub details: String,
+}
+
+#[derive(Debug)]
 pub struct LSPLocation {
     pub uri: String,
     pub range: Range,
@@ -38,6 +50,7 @@ pub struct HoverResult {
 #[derive(Debug)]
 pub enum LSPResult {
     Hover(HoverResult),
+    Completion(CompletionResult),
     Definition(DefinitionResult),
 }
 
@@ -45,6 +58,12 @@ pub enum LSPResult {
 pub struct GitlabFile {
     pub path: String,
     pub content: String,
+}
+
+#[derive(Debug)]
+pub struct GitlabRootNode {
+    pub key: String,
+    pub description: String,
 }
 
 #[derive(Clone, Debug)]

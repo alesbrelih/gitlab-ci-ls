@@ -3,29 +3,32 @@ use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use log::{debug, error, info};
 use lsp_server::{Notification, Request};
 use lsp_types::{
-    request::GotoTypeDefinitionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
-    HoverParams, Url,
+    request::GotoTypeDefinitionParams, CompletionParams, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, HoverParams, Url,
 };
 use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
 use crate::{
     parser::{self, ParserUtils},
-    DefinitionResult, HoverResult, LSPConfig, LSPLocation, LSPResult,
+    DefinitionResult, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
 };
 
 pub struct LspEvents {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
+    nodes: Mutex<HashMap<String, String>>,
     parser: parser::Parser,
 }
 
 impl LspEvents {
     pub fn new(cfg: LSPConfig) -> LspEvents {
         let store = Mutex::new(HashMap::new());
+        let nodes = Mutex::new(HashMap::new());
 
         let events = LspEvents {
             cfg: cfg.clone(),
             store,
+            nodes,
             parser: parser::Parser::new(cfg.package_map, cfg.cache_path),
         };
 
@@ -101,6 +104,8 @@ impl LspEvents {
             return None;
         }
 
+        // TODO: nodes
+
         let mut store = self.store.lock().unwrap();
         store.insert(
             params.text_document.uri.clone().into(),
@@ -117,14 +122,19 @@ impl LspEvents {
         debug!("started searching");
 
         let mut store = self.store.lock().unwrap();
+        let mut all_nodes = self.nodes.lock().unwrap();
 
-        let files =
+        if let Some((files, nodes)) =
             self.parser
-                .parse_contents(&params.text_document.uri, &params.text_document.text, true);
-
-        if let Some(files) = files {
+                .parse_contents(&params.text_document.uri, &params.text_document.text, true)
+        {
             for file in files {
                 store.insert(file.path, file.content);
+            }
+
+            for node in nodes {
+                info!("found node: {:?}", &node);
+                all_nodes.insert(node.key, node.description);
             }
         }
 
@@ -160,6 +170,7 @@ impl LspEvents {
         let word =
             ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
         debug!("word: {}", word);
+
         let mut locations: Vec<LSPLocation> = vec![];
 
         for (uri, content) in store.iter() {
@@ -202,8 +213,54 @@ impl LspEvents {
         }))
     }
 
+    pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
+        let params: CompletionParams = serde_json::from_value(request.params).ok()?;
+
+        let store = self.store.lock().unwrap();
+        let document_uri = params.text_document_position.text_document.uri;
+        let document = store.get::<String>(&document_uri.clone().into())?;
+
+        let position = params.text_document_position.position;
+        let line = document.lines().nth(position.line as usize)?;
+
+        if !line.trim().starts_with("extends:") {
+            error!("invalid: {:?}", line);
+
+            return None;
+        }
+
+        let word = ParserUtils::word_before_cursor(line, position.character as usize);
+
+        if word.is_empty() || word == "extends" {
+            error!("invalid word: {:?}", word);
+
+            return None;
+        }
+
+        info!("got word: {}", word);
+
+        let nodes = self.nodes.lock().unwrap();
+        let mut items: Vec<LSPCompletion> = vec![];
+
+        // TODO: make it fuzzy
+        for (node_key, node_description) in nodes.iter() {
+            if node_key.starts_with('.') && node_key.contains(word) {
+                items.push(LSPCompletion {
+                    label: node_key.clone(),
+                    details: node_description.clone(),
+                })
+            }
+        }
+
+        Some(LSPResult::Completion(crate::CompletionResult {
+            id: request.id,
+            list: items,
+        }))
+    }
+
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let mut store = self.store.lock().unwrap();
+        let mut all_nodes = self.nodes.lock().unwrap();
 
         let mut uri = Url::parse(format!("file://{}/", root_dir).as_str())?;
         info!("uri: {}", &uri);
@@ -231,11 +288,15 @@ impl LspEvents {
         };
 
         info!("URI: {}", &uri);
-        let files = self.parser.parse_contents(&uri, &root_file_content, true);
-        if let Some(files) = files {
+        if let Some((files, nodes)) = self.parser.parse_contents(&uri, &root_file_content, true) {
             for file in files {
                 info!("found file: {:?}", &file);
                 store.insert(file.path, file.content);
+            }
+
+            for node in nodes {
+                info!("found node: {:?}", &node);
+                all_nodes.insert(node.key, node.description);
             }
         }
 
