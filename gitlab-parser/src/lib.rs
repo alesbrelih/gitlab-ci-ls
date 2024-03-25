@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lsp_server::RequestId;
 
 pub mod events;
-mod utils;
+mod parser;
 
 #[derive(Debug)]
 pub struct LSPPosition {
@@ -39,6 +39,12 @@ pub struct HoverResult {
 pub enum LSPResult {
     Hover(HoverResult),
     Definition(DefinitionResult),
+}
+
+#[derive(Debug)]
+pub struct GitlabFile {
+    pub path: String,
+    pub content: String,
 }
 
 #[derive(Clone, Debug)]

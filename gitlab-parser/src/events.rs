@@ -9,20 +9,24 @@ use lsp_types::{
 use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
 use crate::{
-    utils::{self, get_root_node, parse_contents},
+    parser::{self, ParserUtils},
     DefinitionResult, HoverResult, LSPConfig, LSPLocation, LSPResult,
 };
 
 pub struct LspEvents {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
+    parser: parser::Parser,
 }
 
 impl LspEvents {
     pub fn new(cfg: LSPConfig) -> LspEvents {
+        let store = Mutex::new(HashMap::new());
+
         let events = LspEvents {
-            cfg,
-            store: Mutex::new(HashMap::new()),
+            cfg: cfg.clone(),
+            store,
+            parser: parser::Parser::new(cfg.package_map, cfg.cache_path),
         };
 
         match events.index_workspace(events.cfg.root_dir.as_str()) {
@@ -39,21 +43,28 @@ impl LspEvents {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
-        let uri = params.text_document_position_params.text_document.uri;
+        let uri = &params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&uri.clone().into())?;
 
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let word = utils::extract_word(line, position.character as usize)?.trim_end_matches(':');
+        let word =
+            ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
 
         let mut hover = String::new();
 
-        for document in store.values() {
-            let (node_key, node_value) = match get_root_node(document, word) {
+        for (content_uri, content) in store.iter() {
+            let (node_key, node_value) = match ParserUtils::get_root_node(content, word) {
                 Some((node_key, node_value)) => (node_key, node_value),
                 _ => continue,
             };
+
+            // Check if we found the same line that triggered the hover event and discard it
+            // adding format : because yaml parser removes it from the key
+            if content_uri.ends_with(uri.as_str()) && line.eq(&format!("{}:", node_key.as_str()?)) {
+                continue;
+            }
 
             let mut current_hover = String::new();
             let mut hash = Hash::new();
@@ -71,8 +82,11 @@ impl LspEvents {
             hover = format!("{}{}", hover, current_hover);
         }
 
+        if hover.is_empty() {
+            return None;
+        }
+
         hover = format!("```yaml \r\n{}\r\n```", hover);
-        // TODO: support multiple hovers?
 
         Some(LSPResult::Hover(HoverResult {
             id: request.id,
@@ -104,15 +118,15 @@ impl LspEvents {
 
         let mut store = self.store.lock().unwrap();
 
-        parse_contents(
-            &mut store,
-            &self.cfg.package_map,
-            self.cfg.cache_path.as_str(),
-            &params.text_document.uri,
-            &params.text_document.text,
-            true,
-            0,
-        );
+        let files =
+            self.parser
+                .parse_contents(&params.text_document.uri, &params.text_document.text, true);
+
+        if let Some(files) = files {
+            for file in files {
+                store.insert(file.path, file.content);
+            }
+        }
 
         debug!("finished searching");
 
@@ -123,8 +137,8 @@ impl LspEvents {
         let params = serde_json::from_value::<GotoTypeDefinitionParams>(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
-        let uri = params.text_document_position_params.text_document.uri;
-        let document = store.get::<String>(&uri.clone().into())?;
+        let document_uri = params.text_document_position_params.text_document.uri;
+        let document = store.get::<String>(&document_uri.clone().into())?;
 
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
@@ -143,7 +157,8 @@ impl LspEvents {
             return None;
         }
 
-        let word = utils::extract_word(line, position.character as usize)?.trim_end_matches(':');
+        let word =
+            ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
         debug!("word: {}", word);
         let mut locations: Vec<LSPLocation> = vec![];
 
@@ -162,16 +177,21 @@ impl LspEvents {
 
             debug!("checking uri: {}", uri);
 
-            if let Yaml::Hash(root) = yaml_content {
-                for (key, _) in root {
-                    if let Yaml::String(key_str) = key {
-                        if key_str.as_str() == word {
-                            locations.push(LSPLocation {
-                                uri: uri.clone(),
-                                range: utils::find_position(content, word)?,
-                            });
-                        }
+            for (key, _) in yaml_content.as_hash()? {
+                if key.as_str()? == word {
+                    // shouldn't push when we use go to definition on a root node and this
+                    // is the same node
+                    // But we need to allow it because gitlab is based on inheritence
+                    if document_uri.as_str().ends_with(uri)
+                        && line.eq(&format!("{}:", key.as_str()?))
+                    {
+                        continue;
                     }
+
+                    locations.push(LSPLocation {
+                        uri: uri.clone(),
+                        range: ParserUtils::find_position(content, word)?,
+                    });
                 }
             }
         }
@@ -211,16 +231,13 @@ impl LspEvents {
         };
 
         info!("URI: {}", &uri);
-
-        parse_contents(
-            &mut store,
-            &self.cfg.package_map,
-            self.cfg.cache_path.as_str(),
-            &uri,
-            &root_file_content,
-            true,
-            0,
-        );
+        let files = self.parser.parse_contents(&uri, &root_file_content, true);
+        if let Some(files) = files {
+            for file in files {
+                info!("found file: {:?}", &file);
+                store.insert(file.path, file.content);
+            }
+        }
 
         Ok(())
     }

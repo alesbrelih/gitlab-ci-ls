@@ -88,7 +88,9 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     for msg in &connection.receiver {
         info!("receiver message {:?}", msg);
 
-        let result = match msg {
+        let msg_clone = msg.clone();
+
+        let result = match msg_clone {
             // TODO: implement workspace/didChangeConfiguration
             Message::Notification(notification) => match notification.method.as_str() {
                 "textDocument/didOpen" => lsp_events.on_open(notification),
@@ -171,7 +173,18 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 connection.sender.send(msg)
             }
-            None => continue,
+            None => match msg {
+                Message::Request(req) => {
+                    let msg = Message::Response(Response {
+                        id: req.id,
+                        result: Some(serde_json::Value::Null),
+                        error: None,
+                    });
+
+                    connection.sender.send(msg)
+                }
+                _ => Ok(()),
+            },
         };
 
         match sent {
