@@ -85,7 +85,7 @@ npm install -g @vscode/vsce
 Then:
 
 ```bash
-vsce package
+cd ./vscode-extension/ && vsce package
 ```
 
 This command will output .vsix file that can then be imported to vscode extensions like described [here](https://code.visualstudio.com/docs/editor/extension-marketplace#_install-from-a-vsix).
