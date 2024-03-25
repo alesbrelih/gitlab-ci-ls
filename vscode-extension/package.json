@@ -1,17 +1,17 @@
 {
   "name": "lsp-sample",
   "description": "A language server example",
-  "author": "Microsoft Corporation",
+  "author": "Ales Brelih",
   "license": "MIT",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Microsoft/vscode-extension-samples"
+    "url": "https://github.com/alesbrelih/gitlab-ls"
   },
-  "publisher": "vscode-samples",
+  "publisher": "alesbrelih",
   "categories": [],
   "keywords": [
-    "multi-root ready"
+    "gitlab language server"
   ],
   "engines": {
     "vscode": "^1.75.0"
@@ -20,6 +20,34 @@
     "onLanguage:yaml"
   ],
   "main": "./client/out/extension",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Gitlab LS configuration",
+      "properties": {
+        "gitlabLs.executablePath": {
+          "type": "string",
+          "default": "gitlab-ls",
+          "description": "Path to the gitlab ls."
+        },
+        "gitlabLs.cachePath": {
+          "type": "string",
+          "default": "~/.gitlab-ls/cache/",
+          "description": "Cache path for remote includes."
+        },
+        "gitlabLs.packageMap": {
+          "type": "object",
+          "default": {},
+          "description": "Package map mapping project name to 'user@host'"
+        },
+        "gitlabLs.logPath": {
+          "type": "string",
+          "default": "/tmp/gitlab-ls.log",
+          "description": "Log path for the LS."
+        }
+      }
+    }
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -b",

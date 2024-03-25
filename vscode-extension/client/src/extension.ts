@@ -4,6 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import { ExtensionContext } from "vscode";
+import * as vscode from "vscode";
 
 import {
   LanguageClient,
@@ -14,10 +15,12 @@ import {
 let client: LanguageClient;
 
 export function activate(_: ExtensionContext) {
+  const config = vscode.workspace.getConfiguration("gitlabLs");
+
   const serverOptions: ServerOptions = {
-    run: { command: "gitlab-ls" },
+    run: { command: config.get("executablePath") },
     debug: {
-      command: "gitlab-ls",
+      command: config.get("executablePath"),
     },
   };
 
@@ -28,11 +31,9 @@ export function activate(_: ExtensionContext) {
       { scheme: "file", language: "yaml", pattern: "**/.gitlab*" },
     ],
     initializationOptions: {
-      cache: "~/.gitlab-ls/cache/",
-      log_path: "/tmp/gitlab-ls.log",
-      package_map: {
-        somepackage: "git@host",
-      },
+      cache: config.get("cachePath"),
+      log_path: config.get("logPath"),
+      package_map: config.get("packageMap"),
     },
   };
 

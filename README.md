@@ -23,8 +23,10 @@ automatically tries to use SSH key in SSH agent.
 ## Build
 
 ```sh
-  cargo build
+  cargo build --release
 ```
+
+Executable can then be found at _target/release/gitlab-ls_
 
 ## Integration with Neovim
 
@@ -66,3 +68,27 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 ```
+
+## Integration with VSCode
+
+Extension hasn't been published to marketplace yet.
+
+To use this extension you need to build and install it manually.
+
+First:
+
+```bash
+npm install -g @vscode/vsce
+```
+
+Then:
+
+```bash
+vsce package
+```
+
+This command will output .vsix file that can then be imported to vscode extensions like described [here](https://code.visualstudio.com/docs/editor/extension-marketplace#_install-from-a-vsix).
+
+This extension supports configuration which needs to be set up because _gitlab-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases or built from source.
+
+![vscode settings](./docs/images/vscode-settings.jpg)
