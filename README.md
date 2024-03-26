@@ -24,7 +24,7 @@ automatically tries to use SSH key in SSH agent.
 ## Build
 
 ```sh
-  cargo build --release
+cargo build --release
 ```
 
 Executable can then be found at _target/release/gitlab-ls_
@@ -85,7 +85,9 @@ npm install -g @vscode/vsce
 Then:
 
 ```bash
-cd ./vscode-extension/ && vsce package
+cd ./vscode-extension/
+npm install
+vsce package
 ```
 
 This command will output .vsix file that can then be imported to vscode extensions like described [here](https://code.visualstudio.com/docs/editor/extension-marketplace#_install-from-a-vsix).
