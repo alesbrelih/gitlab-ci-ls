@@ -1,5 +1,5 @@
 {
-  "name": "lsp-sample",
+  "name": "gitlab-ls",
   "description": "A language server example",
   "author": "Ales Brelih",
   "license": "MIT",
