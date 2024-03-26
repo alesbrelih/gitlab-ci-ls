@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    CompletionItem, CompletionList, Hover, HoverContents, LocationLink, MarkedString, Position,
-    ServerCapabilities, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
+    CompletionItem, CompletionList, Hover, HoverContents, LocationLink, MarkedString,
+    MarkupContent, Position, ServerCapabilities, TextDocumentSyncKind, Url,
+    WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
@@ -154,7 +155,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                             .iter()
                             .map(|c| CompletionItem {
                                 label: c.label.clone(),
-                                detail: Some(c.details.clone()),
+                                documentation: Some(lsp_types::Documentation::MarkupContent(
+                                    MarkupContent {
+                                        kind: lsp_types::MarkupKind::Markdown,
+                                        value: format!("```yaml\r\n{}\r\n```", c.details.clone()),
+                                    },
+                                )),
                                 ..Default::default()
                             })
                             .collect(),
