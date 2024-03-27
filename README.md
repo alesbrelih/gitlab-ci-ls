@@ -21,6 +21,33 @@ then use its files to jump to definition.
 To clone the repository it currently only supports ssh protocol and it
 automatically tries to use SSH key in SSH agent.
 
+It will try to find the correct remote by reading current working directory remote.
+In case there are multiple remotes (in cases such as forks) it is best to set the remote using the package_map option.
+
+For example:
+
+```
+{
+  ... other configuration,
+  package_map: {
+    "mytemplaterepository": "git@gitlab.com"
+  }
+}
+```
+
+in case where we are including gitlab files from a remote. For example:
+
+```yaml
+include:
+  - project: mytemplaterepository
+    ref: 1.0.0
+    file:
+      - "/.ci-template.yml"
+```
+
+Otherwise it will clone from the first remote it has access to which
+doesn't guarantee that this is the file version you want.
+
 ## Build
 
 ```sh

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, env, fs, path::Path};
 
 use git2::{Cred, RemoteCallbacks};
 use log::{debug, error, info};
@@ -8,8 +8,9 @@ use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 use crate::{GitlabFile, GitlabRootNode, LSPPosition, Range};
 
 pub struct Parser {
-    package_map: HashMap<String, String>,
     cache_path: String,
+    package_map: HashMap<String, String>,
+    remote_urls: Vec<String>,
 }
 
 pub struct ParserUtils {}
@@ -126,8 +127,13 @@ impl ParserUtils {
 }
 
 impl Parser {
-    pub fn new(package_map: HashMap<String, String>, cache_path: String) -> Parser {
+    pub fn new(
+        remote_urls: Vec<String>,
+        package_map: HashMap<String, String>,
+        cache_path: String,
+    ) -> Parser {
         Parser {
+            remote_urls,
             package_map,
             cache_path,
         }
@@ -339,34 +345,46 @@ impl Parser {
         builder.fetch_options(fo);
 
         // Clone the project.
-        let host = match self.package_map.get(remote_pkg) {
-            Some(host) => host,
-            None => {
-                return;
-            }
+        let remotes = match self.package_map.get(remote_pkg) {
+            Some(host) => vec![host.to_string()],
+            None => self.remote_urls.clone(),
         };
 
-        info!("got git host: {}", host);
+        info!("got git host: {:?}", remotes);
 
         let dest = Path::new(repo_dest);
         info!("clone dest {:?}", dest);
 
-        match builder.clone(format!("{}:{}", host, remote_pkg).as_str(), dest) {
-            Ok(repo) => {
-                debug!("repository successfully cloned: {:?}", repo.path());
-                let (object, reference) = repo.revparse_ext(remote_tag).expect("Object not found");
+        env::set_var("GIT_HTTP_LOW_SPEED_LIMIT", "1000");
+        env::set_var("GIT_HTTP_LOW_SPEED_TIME", "10");
 
-                repo.checkout_tree(&object, None)
-                    .expect("Failed to checkout");
+        for origin in remotes {
+            info!("origin: {:?}", origin);
+            match builder.clone(format!("{}:{}", origin, remote_pkg).as_str(), dest) {
+                Ok(repo) => {
+                    info!("repository successfully cloned: {:?}", repo.path());
+                    let (object, reference) =
+                        repo.revparse_ext(remote_tag).expect("Object not found");
 
-                match reference {
-                    Some(gref) => repo.set_head(gref.name().unwrap()),
-                    None => repo.set_head_detached(object.id()),
+                    repo.checkout_tree(&object, None)
+                        .expect("Failed to checkout");
+
+                    match reference {
+                        Some(gref) => repo.set_head(gref.name().unwrap()),
+                        None => repo.set_head_detached(object.id()),
+                    }
+                    .expect("Failed to set HEAD");
+
+                    break;
                 }
-                .expect("Failed to set HEAD");
-            }
-            Err(err) => {
-                error!("error cloning repo: {:?}", err);
+                Err(err) => {
+                    info!("error cloning repo: {:?}", err);
+                    if dest.exists() {
+                        fs::remove_dir_all(dest).expect("should be able to remove");
+                    }
+
+                    continue;
+                }
             }
         }
     }

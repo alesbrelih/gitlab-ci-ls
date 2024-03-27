@@ -1,3 +1,4 @@
+use git2::Repository;
 use gitlab_parser::events::LspEvents;
 use gitlab_parser::LSPResult;
 use log::{debug, error, info, warn, LevelFilter};
@@ -87,9 +88,27 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         LevelFilter::Warn,
     )?;
 
+    let repo = Repository::open(&init_params.root_path)?;
+    let remote_urls: Vec<String> = repo
+        .remotes()?
+        .iter()
+        .flatten()
+        .flat_map(|r_name| repo.find_remote(r_name))
+        .filter_map(|remote| remote.url().map(|u| u.to_string()))
+        .filter_map(|remote| {
+            let split: Vec<&str> = remote.split(':').collect();
+            if split.len() == 2 {
+                Some(split[0].to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
     let lsp_events = LspEvents::new(gitlab_parser::LSPConfig {
         cache_path: format!("{}/.gitlab-ls/cache/", std::env::var("HOME")?),
         package_map: init_params.initialization_options.package_map,
+        remote_urls,
         root_dir: init_params.root_path,
     });
 

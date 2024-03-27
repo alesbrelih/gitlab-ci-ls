@@ -16,6 +16,7 @@ simple_logger.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 gitlab-parser = { version = "0.1.0", path = "./gitlab-parser" }
+git2.workspace = true
 
 [workspace.dependencies]
 log = "0.4.21"
@@ -31,7 +32,6 @@ git2 = { version = "0.18.3", features = [
   "vendored-libgit2",
   "vendored-openssl",
 ] }
-openssl = { version = "0.10", features = ["vendored"] }
 
 [workspace]
 members = ["gitlab-parser"]

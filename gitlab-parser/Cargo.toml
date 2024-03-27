@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 yaml-rust = "0.4.5"
 git2.workspace = true
-openssl.workspace = true
 log.workspace = true
 lsp-server.workspace = true
 lsp-types.workspace = true

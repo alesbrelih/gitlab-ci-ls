@@ -29,7 +29,7 @@ impl LspEvents {
             cfg: cfg.clone(),
             store,
             nodes,
-            parser: parser::Parser::new(cfg.package_map, cfg.cache_path),
+            parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
         };
 
         match events.index_workspace(events.cfg.root_dir.as_str()) {
