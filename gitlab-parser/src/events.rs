@@ -3,8 +3,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use log::{debug, error, info};
 use lsp_server::{Notification, Request};
 use lsp_types::{
-    request::GotoTypeDefinitionParams, CompletionParams, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, HoverParams, Url,
+    request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams, HoverParams,
+    Url,
 };
 use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
@@ -100,6 +101,7 @@ impl LspEvents {
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {
         let params =
             serde_json::from_value::<DidChangeTextDocumentParams>(notification.params).ok()?;
+
         if params.content_changes.len() != 1 {
             return None;
         }
@@ -124,7 +126,7 @@ impl LspEvents {
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
 
-        if let Some((files, nodes)) =
+        if let Some((files, root_nodes)) =
             self.parser
                 .parse_contents(&params.text_document.uri, &params.text_document.text, true)
         {
@@ -132,7 +134,7 @@ impl LspEvents {
                 store.insert(file.path, file.content);
             }
 
-            for node in nodes {
+            for node in root_nodes {
                 info!("found node: {:?}", &node);
                 all_nodes.insert(node.key, node.description);
             }
@@ -336,5 +338,56 @@ impl LspEvents {
         }
 
         Ok(())
+    }
+
+    pub fn on_save(&self, notification: Notification) -> Option<LSPResult> {
+        let _params =
+            serde_json::from_value::<DidSaveTextDocumentParams>(notification.params).ok()?;
+
+        // PUBLISH DIAGNOSTICS
+
+        None
+    }
+
+    pub fn on_diagnostic(&self, request: Request) -> Option<LSPResult> {
+        let params = serde_json::from_value::<DocumentDiagnosticParams>(request.params).ok()?;
+        let store = self.store.lock().unwrap();
+        let all_nodes = self.nodes.lock().unwrap();
+
+        let content: String = store
+            .get(&params.text_document.uri.to_string())?
+            .to_string();
+
+        let extends =
+            ParserUtils::get_all_extends(params.text_document.uri.to_string(), content.as_str());
+
+        let mut diagnostics: Vec<Diagnostic> = vec![];
+
+        for extend in extends {
+            if extend.uri == params.text_document.uri.to_string()
+                && all_nodes.get(&extend.key).is_none()
+            {
+                diagnostics.push(Diagnostic::new_simple(
+                    lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: extend.range.start.line,
+                            character: extend.range.start.character,
+                        },
+                        end: lsp_types::Position {
+                            line: extend.range.end.line,
+                            character: extend.range.end.character,
+                        },
+                    },
+                    format!("Rule: {} does not exist.", extend.key),
+                ));
+            }
+        }
+
+        error!("diagnostic params: {:?}", diagnostics);
+
+        Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
+            id: request.id,
+            diagnostics,
+        }))
     }
 }

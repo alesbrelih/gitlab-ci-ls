@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    CompletionItem, CompletionList, Hover, HoverContents, LocationLink, MarkedString,
-    MarkupContent, Position, ServerCapabilities, TextDocumentSyncKind, Url,
-    WorkDoneProgressOptions,
+    CompletionItem, CompletionList, DiagnosticServerCapabilities, DocumentFilter,
+    FullDocumentDiagnosticReport, Hover, HoverContents, LocationLink, MarkedString, MarkupContent,
+    Position, ServerCapabilities, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
@@ -59,13 +59,33 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             all_commit_characters: None,
             completion_item: None,
         }),
+        diagnostic_provider: Some(DiagnosticServerCapabilities::RegistrationOptions(
+            lsp_types::DiagnosticRegistrationOptions {
+                diagnostic_options: lsp_types::DiagnosticOptions {
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                    identifier: None,
+                    workspace_diagnostics: false,
+                    inter_file_dependencies: true,
+                },
+                static_registration_options: lsp_types::StaticRegistrationOptions { id: None },
+                text_document_registration_options: lsp_types::TextDocumentRegistrationOptions {
+                    document_selector: Some(vec![DocumentFilter {
+                        pattern: Some(String::from("*gitlab-ci*")),
+                        scheme: Some("file".into()),
+                        language: Some("yaml".into()),
+                    }]),
+                },
+            },
+        )),
 
         ..Default::default()
     })?;
 
     let initialization_params = connection.initialize(server_capabilities)?;
 
-    warn!("params {:?}", initialization_params);
+    error!("params {:?}", initialization_params);
 
     let init_params = match serde_json::from_value::<InitializationParams>(initialization_params) {
         Ok(p) => p,
@@ -82,11 +102,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     };
 
-    info!("init_params {:?}", init_params);
     simple_logging::log_to_file(
-        init_params.initialization_options.log_path,
+        &init_params.initialization_options.log_path,
         LevelFilter::Warn,
     )?;
+
+    info!("init_params {:?}", &init_params);
 
     let repo = Repository::open(&init_params.root_path)?;
     let remote_urls: Vec<String> = repo
@@ -115,15 +136,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     debug!("initialized");
 
     for msg in &connection.receiver {
-        info!("receiver message {:?}", msg);
+        info!("received message {:?}", msg);
 
         let msg_clone = msg.clone();
-
         let result = match msg_clone {
             // TODO: implement workspace/didChangeConfiguration
             Message::Notification(notification) => match notification.method.as_str() {
                 "textDocument/didOpen" => lsp_events.on_open(notification),
                 "textDocument/didChange" => lsp_events.on_change(notification),
+                "textDocument/didSave" => lsp_events.on_save(notification),
                 _ => {
                     warn!("invalid notification method: {:?}", notification);
                     None
@@ -133,6 +154,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 "textDocument/hover" => lsp_events.on_hover(request),
                 "textDocument/definition" => lsp_events.on_definition(request),
                 "textDocument/completion" => lsp_events.on_completion(request),
+                "textDocument/diagnostic" => lsp_events.on_diagnostic(request),
                 "shutdown" => exit(0),
                 method => {
                     warn!("invalid request method: {:?}", method);
@@ -226,6 +248,21 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 let msg = Message::Response(Response {
                     id: definition_result.id,
                     result: serde_json::to_value(locations).ok(),
+                    error: None,
+                });
+
+                connection.sender.send(msg)
+            }
+            Some(LSPResult::Diagnostics(diagnostics)) => {
+                error!("send diagnostics msg: {:?}", diagnostics);
+
+                let msg = Message::Response(Response {
+                    id: diagnostics.id,
+                    result: serde_json::to_value(FullDocumentDiagnosticReport {
+                        items: diagnostics.diagnostics,
+                        ..Default::default()
+                    })
+                    .ok(),
                     error: None,
                 });
 

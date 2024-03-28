@@ -3,9 +3,11 @@ use std::{collections::HashMap, env, fs, path::Path};
 use git2::{Cred, RemoteCallbacks};
 use log::{debug, error, info};
 use lsp_types::Url;
+use tree_sitter::{Query, QueryCursor};
+use tree_sitter_yaml::language;
 use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
-use crate::{GitlabFile, GitlabRootNode, LSPPosition, Range};
+use crate::{GitlabExtend, GitlabFile, GitlabRootNode, LSPPosition, Range};
 
 pub struct Parser {
     cache_path: String,
@@ -123,6 +125,69 @@ impl ParserUtils {
         }
 
         nodes
+    }
+
+    pub fn get_all_extends(uri: String, content: &str) -> Vec<GitlabExtend> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let query_source = r#"
+        (
+            block_mapping_pair
+            key: (flow_node) @key2
+            value: [
+                (flow_node(plain_scalar(string_scalar))) @value
+                (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @item)))))
+            ]
+            (#eq? @key2 "extends")
+        )
+        "#;
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), query_source).unwrap();
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let mut extends: Vec<GitlabExtend> = vec![];
+
+        let valid_indexes: Vec<u32> = vec![1, 2];
+        for mat in matches.into_iter() {
+            for c in mat.captures {
+                if valid_indexes.contains(&c.index) {
+                    let text = &content[c.node.byte_range()];
+                    if c.node.start_position().row != c.node.end_position().row {
+                        // sanity check
+                        error!(
+                            "extends spans over multiple rows: uri: {} text: {}",
+                            uri, text
+                        );
+
+                        continue;
+                    }
+
+                    extends.push(GitlabExtend {
+                        key: text.to_owned(),
+                        uri: uri.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: c.node.start_position().row as u32,
+                                character: c.node.start_position().column as u32,
+                            },
+                            end: LSPPosition {
+                                line: c.node.end_position().row as u32,
+                                character: c.node.end_position().column as u32,
+                            },
+                        },
+                    });
+                }
+            }
+        }
+
+        extends
     }
 }
 

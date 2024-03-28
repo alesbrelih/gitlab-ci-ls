@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use lsp_server::RequestId;
+use lsp_types::Diagnostic;
 
 pub mod events;
 mod parser;
@@ -42,9 +43,33 @@ pub struct LSPLocation {
 }
 
 #[derive(Debug)]
+pub struct LSPDiagnosticItem {
+    pub range: Range,
+    pub severity: String,
+    pub message: String,
+}
+
+#[derive(Debug)]
+pub struct LSPDiagnosticDocument {
+    pub uri: String,
+    pub items: Vec<LSPDiagnosticItem>,
+}
+
+#[derive(Debug)]
+pub struct LSPDiagnostic {
+    pub documents: Vec<LSPDiagnosticDocument>,
+}
+
+#[derive(Debug)]
 pub struct HoverResult {
     pub id: RequestId,
     pub content: String,
+}
+
+#[derive(Debug)]
+pub struct DiagnosticsResult {
+    pub id: RequestId,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug)]
@@ -52,6 +77,7 @@ pub enum LSPResult {
     Hover(HoverResult),
     Completion(CompletionResult),
     Definition(DefinitionResult),
+    Diagnostics(DiagnosticsResult),
 }
 
 #[derive(Debug)]
@@ -64,6 +90,13 @@ pub struct GitlabFile {
 pub struct GitlabRootNode {
     pub key: String,
     pub description: String,
+}
+
+#[derive(Debug)]
+pub struct GitlabExtend {
+    pub key: String,
+    pub uri: String,
+    pub range: Range,
 }
 
 #[derive(Clone, Debug)]

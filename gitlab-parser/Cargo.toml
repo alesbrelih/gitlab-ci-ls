@@ -17,3 +17,5 @@ simple-logging.workspace = true
 simple_logger.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+tree-sitter.workspace = true
+tree-sitter-yaml.workspace = true
