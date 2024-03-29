@@ -7,12 +7,20 @@ use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
-use crate::{GitlabElement, GitlabFile, GitlabRootNode, LSPPosition, Range};
+use crate::{GitlabElement, GitlabFile, GitlabRootNode, LSPPosition, ParseResults, Range};
 
 pub struct Parser {
     cache_path: String,
     package_map: HashMap<String, String>,
     remote_urls: Vec<String>,
+}
+
+// TODO: rooot for the case of importing f9
+pub enum CompletionType {
+    Extend,
+    Stage,
+    Variable,
+    None,
 }
 
 pub struct ParserUtils {}
@@ -40,7 +48,7 @@ impl ParserUtils {
         }
 
         let start = line[..char_index]
-            .rfind(|c: char| c.is_whitespace())
+            .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'')
             .map_or(0, |index| index + 1);
 
         if start == char_index {
@@ -128,6 +136,80 @@ impl ParserUtils {
         nodes
     }
 
+    pub fn get_root_variables(uri: &str, content: &str) -> Vec<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let query_source = r#"
+        (
+            stream(
+                document(
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar) @key))
+                                value: (block_node(
+                                    block_mapping(
+                                        block_mapping_pair
+                                            key: (flow_node(plain_scalar(string_scalar)@env_key))
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        (#eq? @key "variables")
+        )
+        "#;
+
+        // TODO: this should be generic fn accepting treesitter query
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), query_source).unwrap();
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let mut environments = vec![];
+        for mat in matches.into_iter() {
+            for c in mat.captures {
+                if c.index == 1 {
+                    let text = &content[c.node.byte_range()];
+                    if c.node.start_position().row != c.node.end_position().row {
+                        // sanity check
+                        error!(
+                            "environemnt spans over multiple rows: uri: {} text: {}",
+                            uri, text
+                        );
+
+                        continue;
+                    }
+
+                    environments.push(GitlabElement {
+                        key: text.to_owned(),
+                        uri: uri.to_string(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: c.node.start_position().row as u32,
+                                character: c.node.start_position().column as u32,
+                            },
+                            end: LSPPosition {
+                                line: c.node.end_position().row as u32,
+                                character: c.node.end_position().column as u32,
+                            },
+                        },
+                    });
+                }
+            }
+        }
+
+        environments
+    }
+
     pub fn get_stage_definitions(uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
@@ -159,7 +241,7 @@ impl ParserUtils {
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
                         error!(
-                            "extends spans over multiple rows: uri: {} text: {}",
+                            "STAGE: extends spans over multiple rows: uri: {} text: {}",
                             uri, text
                         );
 
@@ -195,10 +277,18 @@ impl ParserUtils {
 
         let query_source = r#"
         (
-        block_mapping_pair
-        key: (flow_node(plain_scalar(string_scalar) @key))
-        value: (flow_node(plain_scalar(string_scalar) @value))
-        (#eq? @key "stage")
+            block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar) @key
+                    )
+                )
+                value: (
+                    flow_node(
+                        plain_scalar(string_scalar) @value
+                    )
+                )
+            (#eq? @key "stage")
         )
         "#;
 
@@ -219,7 +309,7 @@ impl ParserUtils {
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
                         error!(
-                            "extends spans over multiple rows: uri: {} text: {}",
+                            "ALL STAGES: extends spans over multiple rows: uri: {} text: {}",
                             uri, text
                         );
 
@@ -282,7 +372,7 @@ impl ParserUtils {
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
                         error!(
-                            "extends spans over multiple rows: uri: {} text: {}",
+                            "ALL: extends spans over multiple rows: uri: {} text: {}",
                             uri, text
                         );
 
@@ -310,22 +400,83 @@ impl ParserUtils {
         extends
     }
 
-    pub fn is_extend_property(content: &str, position: Position) -> bool {
+    pub fn get_completion_type(content: &str, position: Position) -> CompletionType {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
+        // 1. extends
+        // 2. stages
+        // 3. image variables
+        // 4. before_script variables
         let query_source = r#"
-        (
-            block_mapping_pair
-            key: (flow_node) @key
-            value: [
-                (flow_node(plain_scalar(string_scalar))) @value
-                (block_node(block_sequence(block_sequence_item) @item))
-            ]
-            (#eq? @key "extends")
-        )
+        
+            (
+                block_mapping_pair
+                key: (flow_node) @keyextends
+                value: [
+                    (flow_node(plain_scalar(string_scalar))) @extends
+                    (block_node(block_sequence(block_sequence_item) @extends))
+                ]
+                (#eq? @keyextends "extends")
+            )
+            (
+                block_mapping_pair
+                    key: (
+                        flow_node(
+                            plain_scalar(string_scalar) @keystage
+                        )
+                    )
+                    value: (
+                        flow_node(
+                            plain_scalar(string_scalar) @stage
+                        )
+                    )
+                (#eq? @keystage "stage")
+            )
+            (
+                block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar)  @keyvariable
+                    )
+                )
+                value: 
+                [
+                    (
+                        block_node(
+                            block_mapping(block_mapping_pair
+                                value: 
+                                    [
+                                        (flow_node(flow_sequence(flow_node(double_quote_scalar)) ))
+                                        (flow_node(double_quote_scalar))
+                                    ] @variable
+                            )
+                        )
+                    )
+                    (
+                        block_node(
+                            block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar)))) @variable
+                        )
+                    )
+                    (
+                        block_node(
+                            block_sequence(
+                                block_sequence_item(
+                                    block_node(
+                                        block_mapping(
+                                            block_mapping_pair
+                                            value: (flow_node(double_quote_scalar)) @variable
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                ]
+            (#any-of? @keyvariable "image" "before_script" "after_script" "script" "rules" "variables")
+            )
         "#;
 
         let tree = parser.parse(content, None).unwrap();
@@ -335,18 +486,28 @@ impl ParserUtils {
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        let valid_indexes: Vec<u32> = vec![1, 2];
         for mat in matches.into_iter() {
             for c in mat.captures {
-                if valid_indexes.contains(&c.index)
-                    && c.node.start_position().row == position.line as usize
+                if c.node.start_position().row <= position.line as usize
+                    && c.node.end_position().row >= position.line as usize
                 {
-                    return true;
+                    match c.index {
+                        0 => continue,
+                        1 => return CompletionType::Extend,
+                        2 => continue,
+                        3 => return CompletionType::Stage,
+                        4 => continue,
+                        5 => return CompletionType::Variable,
+                        _ => {
+                            error!("invalid index: {}", c.index);
+                            CompletionType::None
+                        }
+                    };
                 }
             }
         }
 
-        false
+        CompletionType::None
     }
 }
 
@@ -363,34 +524,27 @@ impl Parser {
         }
     }
 
-    pub fn parse_contents(
-        &self,
-        uri: &Url,
-        content: &str,
-        _follow: bool,
-    ) -> Option<(Vec<GitlabFile>, Vec<GitlabRootNode>, Vec<GitlabElement>)> {
-        let mut files: Vec<GitlabFile> = vec![];
-        let mut nodes: Vec<GitlabRootNode> = vec![];
-        let mut stages: Vec<GitlabElement> = vec![];
+    pub fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults> {
+        let files: Vec<GitlabFile> = vec![];
+        let nodes: Vec<GitlabRootNode> = vec![];
+        let stages: Vec<GitlabElement> = vec![];
+        let variables: Vec<GitlabElement> = vec![];
 
-        self.parse_contents_recursive(
-            &mut files,
-            &mut nodes,
-            &mut stages,
-            uri,
-            content,
-            _follow,
-            0,
-        )?;
+        let mut parse_results = ParseResults {
+            files,
+            nodes,
+            stages,
+            variables,
+        };
 
-        Some((files, nodes, stages))
+        self.parse_contents_recursive(&mut parse_results, uri, content, _follow, 0)?;
+
+        Some(parse_results)
     }
 
     fn parse_contents_recursive(
         &self,
-        files: &mut Vec<GitlabFile>,
-        nodes: &mut Vec<GitlabRootNode>,
-        stages: &mut Vec<GitlabElement>,
+        parse_results: &mut ParseResults,
         uri: &lsp_types::Url,
         content: &str,
         _follow: bool,
@@ -401,17 +555,23 @@ impl Parser {
             return None;
         }
 
-        files.push(GitlabFile {
+        parse_results.files.push(GitlabFile {
             path: uri.as_str().into(),
             content: content.into(),
         });
 
-        nodes.append(&mut ParserUtils::get_all_root_nodes(uri.as_str(), content));
+        parse_results
+            .nodes
+            .append(&mut ParserUtils::get_all_root_nodes(uri.as_str(), content));
+
+        parse_results
+            .variables
+            .append(&mut ParserUtils::get_root_variables(uri.as_str(), content));
 
         // arrays are overriden in gitlab.
         let found_stages = ParserUtils::get_stage_definitions(uri.as_str(), content);
         if !found_stages.is_empty() {
-            *stages = found_stages;
+            parse_results.stages = found_stages;
         }
 
         let (_, value) = ParserUtils::get_root_node(content, "include")?;
@@ -426,9 +586,7 @@ impl Parser {
                     for (key, item_value) in item {
                         if !remote_pkg.is_empty() {
                             self.fetch_remote_files(
-                                files,
-                                nodes,
-                                stages,
+                                parse_results,
                                 &remote_pkg,
                                 &remote_tag,
                                 &remote_files,
@@ -445,9 +603,7 @@ impl Parser {
 
                                         if _follow {
                                             self.parse_contents_recursive(
-                                                files,
-                                                nodes,
-                                                stages,
+                                                parse_results,
                                                 &current_uri,
                                                 &current_content,
                                                 _follow,
@@ -483,9 +639,7 @@ impl Parser {
 
                     if !remote_pkg.is_empty() {
                         self.fetch_remote_files(
-                            files,
-                            nodes,
-                            stages,
+                            parse_results,
                             &remote_pkg,
                             &remote_tag,
                             &remote_files,
@@ -500,9 +654,7 @@ impl Parser {
 
     fn fetch_remote_files(
         &self,
-        files: &mut Vec<GitlabFile>,
-        nodes: &mut Vec<GitlabRootNode>,
-        stages: &mut Vec<GitlabElement>,
+        parse_results: &mut ParseResults,
         remote_pkg: &String,
         remote_tag: &String,
         remote_files: &Vec<String>,
@@ -542,12 +694,14 @@ impl Parser {
                 }
             };
 
-            nodes.append(&mut ParserUtils::get_all_root_nodes(
-                uri.as_str(),
-                content.as_str(),
-            ));
+            parse_results
+                .nodes
+                .append(&mut ParserUtils::get_all_root_nodes(
+                    uri.as_str(),
+                    content.as_str(),
+                ));
 
-            files.push(GitlabFile {
+            parse_results.files.push(GitlabFile {
                 path: uri.as_str().into(),
                 content: content.clone(),
             });
@@ -555,8 +709,15 @@ impl Parser {
             // arrays are overriden in gitlab.
             let found_stages = ParserUtils::get_stage_definitions(uri.as_str(), content.as_str());
             if !found_stages.is_empty() {
-                *stages = found_stages;
+                parse_results.stages = found_stages;
             }
+
+            parse_results
+                .variables
+                .append(&mut ParserUtils::get_root_variables(
+                    uri.as_str(),
+                    content.as_str(),
+                ));
         }
     }
 

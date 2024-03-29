@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    CompletionItem, CompletionList, DiagnosticServerCapabilities, DocumentFilter,
-    FullDocumentDiagnosticReport, Hover, HoverContents, LocationLink, MarkedString, MarkupContent,
-    Position, ServerCapabilities, TextDocumentSyncKind, Url, WorkDoneProgressOptions,
+    CompletionItem, CompletionItemKind, CompletionList, DiagnosticServerCapabilities,
+    DocumentFilter, FullDocumentDiagnosticReport, Hover, HoverContents, LocationLink, MarkedString,
+    MarkupContent, Position, ServerCapabilities, TextDocumentSyncKind, Url,
+    WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
@@ -194,15 +195,26 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                         items: completion_result
                             .list
                             .iter()
-                            .map(|c| CompletionItem {
-                                label: c.label.clone(),
-                                documentation: Some(lsp_types::Documentation::MarkupContent(
-                                    MarkupContent {
-                                        kind: lsp_types::MarkupKind::Markdown,
-                                        value: format!("```yaml\r\n{}\r\n```", c.details.clone()),
-                                    },
-                                )),
-                                ..Default::default()
+                            .map(|c| {
+                                let mut item = CompletionItem {
+                                    label: c.label.clone(),
+                                    kind: Some(CompletionItemKind::KEYWORD),
+                                    ..Default::default()
+                                };
+
+                                if let Some(documentation) = c.details.clone() {
+                                    item.documentation = Some(
+                                        lsp_types::Documentation::MarkupContent(MarkupContent {
+                                            kind: lsp_types::MarkupKind::Markdown,
+                                            value: format!(
+                                                "```yaml\r\n{}\r\n```",
+                                                documentation.clone()
+                                            ),
+                                        }),
+                                    );
+                                }
+
+                                item
                             })
                             .collect(),
                         is_incomplete: false,
@@ -254,8 +266,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 connection.sender.send(msg)
             }
             Some(LSPResult::Diagnostics(diagnostics)) => {
-                error!("send diagnostics msg: {:?}", diagnostics);
-
                 let msg = Message::Response(Response {
                     id: diagnostics.id,
                     result: serde_json::to_value(FullDocumentDiagnosticReport {

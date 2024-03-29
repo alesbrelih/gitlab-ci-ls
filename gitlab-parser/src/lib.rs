@@ -33,7 +33,7 @@ pub struct CompletionResult {
 #[derive(Debug)]
 pub struct LSPCompletion {
     pub label: String,
-    pub details: String,
+    pub details: Option<String>,
 }
 
 #[derive(Debug)]
@@ -98,6 +98,14 @@ pub struct GitlabElement {
     pub key: String,
     pub uri: String,
     pub range: Range,
+}
+
+#[derive(Debug)]
+pub struct ParseResults {
+    pub files: Vec<GitlabFile>,
+    pub nodes: Vec<GitlabRootNode>,
+    pub stages: Vec<GitlabElement>,
+    pub variables: Vec<GitlabElement>,
 }
 
 #[derive(Clone, Debug)]

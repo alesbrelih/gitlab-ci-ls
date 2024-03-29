@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::{collections::HashMap, fmt::format, path::PathBuf, sync::Mutex, time::Instant};
 
 use log::{debug, error, info};
 use lsp_server::{Notification, Request};
@@ -19,6 +19,7 @@ pub struct LSPHandlers {
     store: Mutex<HashMap<String, String>>,
     nodes: Mutex<HashMap<String, HashMap<String, String>>>,
     stages: Mutex<HashMap<String, GitlabElement>>,
+    variables: Mutex<HashMap<String, GitlabElement>>,
     parser: parser::Parser,
 }
 
@@ -27,12 +28,14 @@ impl LSPHandlers {
         let store = Mutex::new(HashMap::new());
         let nodes = Mutex::new(HashMap::new());
         let stages = Mutex::new(HashMap::new());
+        let variables = Mutex::new(HashMap::new());
 
         let events = LSPHandlers {
             cfg: cfg.clone(),
             store,
             nodes,
             stages,
+            variables,
             parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
         };
 
@@ -116,16 +119,18 @@ impl LSPHandlers {
         // reset previous
         all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
-        if let Some((files, root_nodes, stages)) = self.parser.parse_contents(
+        let mut all_variables = self.variables.lock().unwrap();
+
+        if let Some(results) = self.parser.parse_contents(
             &params.text_document.uri,
             &params.content_changes.first()?.text,
             false,
         ) {
-            for file in files {
+            for file in results.files {
                 store.insert(file.path, file.content);
             }
 
-            for node in root_nodes {
+            for node in results.nodes {
                 info!("found node: {:?}", &node);
                 all_nodes
                     .entry(node.uri)
@@ -133,14 +138,21 @@ impl LSPHandlers {
                     .insert(node.key, node.description);
             }
 
-            if !stages.is_empty() {
+            if !results.stages.is_empty() {
                 let mut all_stages = self.stages.lock().unwrap();
                 all_stages.clear();
 
-                for stage in stages {
+                for stage in results.stages {
                     info!("found stage: {:?}", &stage);
                     all_stages.insert(stage.key.clone(), stage);
                 }
+            }
+
+            // should be per file...
+            // TODO: clear correct variables
+            for variable in results.variables {
+                info!("found variable: {:?}", &variable);
+                all_variables.insert(variable.key.clone(), variable);
             }
         }
 
@@ -159,15 +171,15 @@ impl LSPHandlers {
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
 
-        if let Some((files, root_nodes, stages)) =
+        if let Some(results) =
             self.parser
                 .parse_contents(&params.text_document.uri, &params.text_document.text, true)
         {
-            for file in files {
+            for file in results.files {
                 store.insert(file.path, file.content);
             }
 
-            for node in root_nodes {
+            for node in results.nodes {
                 info!("found node: {:?}", &node);
 
                 all_nodes
@@ -176,7 +188,7 @@ impl LSPHandlers {
                     .insert(node.key, node.description);
             }
 
-            for stage in stages {
+            for stage in results.stages {
                 info!("found stage: {:?}", &stage);
                 all_stages.insert(stage.key.clone(), stage);
             }
@@ -268,28 +280,67 @@ impl LSPHandlers {
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        if !ParserUtils::is_extend_property(document, position) {
-            return None;
-        }
-
         let word = ParserUtils::word_before_cursor(line, position.character as usize);
-
-        info!("got word: {}", word);
-
-        let nodes = self.nodes.lock().unwrap();
         let mut items: Vec<LSPCompletion> = vec![];
 
-        // TODO: make it fuzzy
-        for (_, node) in nodes.iter() {
-            for (node_key, node_description) in node.iter() {
-                if node_key.starts_with('.') && node_key.contains(word) {
-                    items.push(LSPCompletion {
-                        label: node_key.clone(),
-                        details: node_description.clone(),
-                    })
+        let start = Instant::now();
+        let completion_type = ParserUtils::get_completion_type(document, position);
+
+        error!("ELAPSED: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        match completion_type {
+            parser::CompletionType::None => return None,
+            parser::CompletionType::Stage => {
+                error!("STAGE");
+
+                let stages = self.stages.lock().unwrap();
+
+                error!("stage: {:?}", stages.keys());
+                error!("word: {:?}", word);
+                for (stage, _) in stages.iter() {
+                    if stage.contains(word) {
+                        items.push(LSPCompletion {
+                            label: stage.clone(),
+                            details: None,
+                        })
+                    }
+                }
+            }
+            parser::CompletionType::Extend => {
+                error!("EXTEND");
+
+                let nodes = self.nodes.lock().unwrap();
+
+                for (_, node) in nodes.iter() {
+                    for (node_key, node_description) in node.iter() {
+                        if node_key.starts_with('.') && node_key.contains(word) {
+                            items.push(LSPCompletion {
+                                label: node_key.clone(),
+                                details: Some(node_description.clone()),
+                            })
+                        }
+                    }
+                }
+                error!("ELAPSED: {:?}", start.elapsed());
+            }
+            parser::CompletionType::Variable => {
+                error!("VARIABLE");
+
+                let variables = self.variables.lock().unwrap();
+
+                for (variable, _) in variables.iter() {
+                    if format!("${}", variable).starts_with(word) {
+                        items.push(LSPCompletion {
+                            label: variable.clone(),
+                            details: None,
+                        })
+                    }
                 }
             }
         }
+
+        info!("got word: {}", word);
 
         Some(LSPResult::Completion(crate::CompletionResult {
             id: request.id,
@@ -298,9 +349,12 @@ impl LSPHandlers {
     }
 
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
+        let start = Instant::now();
+
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
+        let mut all_variables = self.variables.lock().unwrap();
 
         let mut uri = Url::parse(format!("file://{}/", root_dir).as_str())?;
         info!("uri: {}", &uri);
@@ -328,15 +382,13 @@ impl LSPHandlers {
         };
 
         info!("URI: {}", &uri);
-        if let Some((files, nodes, stages)) =
-            self.parser.parse_contents(&uri, &root_file_content, true)
-        {
-            for file in files {
+        if let Some(results) = self.parser.parse_contents(&uri, &root_file_content, true) {
+            for file in results.files {
                 info!("found file: {:?}", &file);
                 store.insert(file.path, file.content);
             }
 
-            for node in nodes {
+            for node in results.nodes {
                 info!("found node: {:?}", &node);
                 all_nodes
                     .entry(node.uri)
@@ -344,11 +396,18 @@ impl LSPHandlers {
                     .insert(node.key, node.description);
             }
 
-            for stage in stages {
+            for stage in results.stages {
                 info!("found stage: {:?}", &stage);
                 all_stages.insert(stage.key.clone(), stage);
             }
+
+            for variable in results.variables {
+                info!("found variable: {:?}", &variable);
+                all_variables.insert(variable.key.clone(), variable);
+            }
         }
+
+        error!("ELAPSED: {:?}", start.elapsed());
 
         Ok(())
     }
@@ -400,14 +459,10 @@ impl LSPHandlers {
             }
         }
 
-        error!("diagnostic params: {:?}", diagnostics);
-
         let stages =
             ParserUtils::get_all_stages(params.text_document.uri.to_string(), content.as_str());
 
         let all_stages = self.stages.lock().unwrap();
-        error!("diagnostic - stages: {:?}", stages);
-
         for stage in stages {
             if all_stages.get(&stage.key).is_none() {
                 diagnostics.push(Diagnostic::new_simple(
