@@ -14,19 +14,19 @@ use crate::{
     DefinitionResult, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
 };
 
-pub struct LspEvents {
+pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
     nodes: Mutex<HashMap<String, String>>,
     parser: parser::Parser,
 }
 
-impl LspEvents {
-    pub fn new(cfg: LSPConfig) -> LspEvents {
+impl LSPHandlers {
+    pub fn new(cfg: LSPConfig) -> LSPHandlers {
         let store = Mutex::new(HashMap::new());
         let nodes = Mutex::new(HashMap::new());
 
-        let events = LspEvents {
+        let events = LSPHandlers {
             cfg: cfg.clone(),
             store,
             nodes,
@@ -101,6 +101,10 @@ impl LspEvents {
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {
         let params =
             serde_json::from_value::<DidChangeTextDocumentParams>(notification.params).ok()?;
+
+        //TODO: need to clear everything
+        // also probaby restructure store a bit because else I would need to clear everything
+        // this way I just need to clear single URI entry
 
         if params.content_changes.len() != 1 {
             return None;

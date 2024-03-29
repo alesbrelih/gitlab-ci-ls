@@ -1,5 +1,5 @@
 use git2::Repository;
-use gitlab_parser::events::LspEvents;
+use gitlab_parser::handlers::LSPHandlers;
 use gitlab_parser::LSPResult;
 use log::{debug, error, info, warn, LevelFilter};
 use serde::{Deserialize, Serialize};
@@ -126,7 +126,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         })
         .collect();
 
-    let lsp_events = LspEvents::new(gitlab_parser::LSPConfig {
+    let lsp_events = LSPHandlers::new(gitlab_parser::LSPConfig {
         cache_path: format!("{}/.gitlab-ls/cache/", std::env::var("HOME")?),
         package_map: init_params.initialization_options.package_map,
         remote_urls,

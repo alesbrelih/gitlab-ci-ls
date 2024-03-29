@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lsp_server::RequestId;
 use lsp_types::Diagnostic;
 
-pub mod events;
+pub mod handlers;
 mod parser;
 
 #[derive(Debug)]
