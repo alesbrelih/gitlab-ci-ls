@@ -248,55 +248,12 @@ impl LSPHandlers {
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
-        let split: Vec<&str> = line.trim().split(' ').map(|w| w.trim()).collect();
 
-        // TODO: make it better
-        if split.len() != 2 {
-            error!("invalid len: {:?}", split);
-
+        if !ParserUtils::is_extend_property(document, position) {
             return None;
-        }
-        if split.len() == 2 && split[0] != "extends:" && split[0] != "-" {
-            error!("invalid second: {:?}", split);
-
-            return None;
-        }
-
-        if split[0] == "-" {
-            //navigate upwards to see if parent is extends
-            // TODO: make this smarter
-            if position.line < 2 {
-                return None;
-            }
-
-            let start_line = position.line.saturating_sub(15).max(0) as usize;
-            let position_line = (position.line - 1) as usize;
-            let document_lines = document.lines().collect::<Vec<&str>>();
-
-            // find first line that isnt a comment, or - or whitespace
-            let is_valid = document_lines[start_line..=position_line]
-                .iter()
-                .rev()
-                .map(|line| line.trim())
-                .find(|&line| !line.starts_with('#') && !line.is_empty() && !line.starts_with('-'))
-                .map(|line| {
-                    error!("line: {}", line);
-                    line
-                })
-                .map_or(false, |line| line.starts_with("extends:"));
-
-            if !is_valid {
-                return None;
-            }
         }
 
         let word = ParserUtils::word_before_cursor(line, position.character as usize);
-
-        if word.is_empty() || word == "extends" || word == "-" {
-            error!("invalid word: {:?}", word);
-
-            return None;
-        }
 
         info!("got word: {}", word);
 
