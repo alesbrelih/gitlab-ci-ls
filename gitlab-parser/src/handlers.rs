@@ -11,13 +11,14 @@ use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
 
 use crate::{
     parser::{self, ParserUtils},
-    DefinitionResult, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
+    DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
 };
 
 pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
     nodes: Mutex<HashMap<String, HashMap<String, String>>>,
+    stages: Mutex<HashMap<String, GitlabElement>>,
     parser: parser::Parser,
 }
 
@@ -25,11 +26,13 @@ impl LSPHandlers {
     pub fn new(cfg: LSPConfig) -> LSPHandlers {
         let store = Mutex::new(HashMap::new());
         let nodes = Mutex::new(HashMap::new());
+        let stages = Mutex::new(HashMap::new());
 
         let events = LSPHandlers {
             cfg: cfg.clone(),
             store,
             nodes,
+            stages,
             parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
         };
 
@@ -113,7 +116,7 @@ impl LSPHandlers {
         // reset previous
         all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
-        if let Some((files, root_nodes)) = self.parser.parse_contents(
+        if let Some((files, root_nodes, stages)) = self.parser.parse_contents(
             &params.text_document.uri,
             &params.content_changes.first()?.text,
             false,
@@ -124,11 +127,20 @@ impl LSPHandlers {
 
             for node in root_nodes {
                 info!("found node: {:?}", &node);
-
                 all_nodes
                     .entry(node.uri)
                     .or_default()
                     .insert(node.key, node.description);
+            }
+
+            if !stages.is_empty() {
+                let mut all_stages = self.stages.lock().unwrap();
+                all_stages.clear();
+
+                for stage in stages {
+                    info!("found stage: {:?}", &stage);
+                    all_stages.insert(stage.key.clone(), stage);
+                }
             }
         }
 
@@ -145,8 +157,9 @@ impl LSPHandlers {
 
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
+        let mut all_stages = self.stages.lock().unwrap();
 
-        if let Some((files, root_nodes)) =
+        if let Some((files, root_nodes, stages)) =
             self.parser
                 .parse_contents(&params.text_document.uri, &params.text_document.text, true)
         {
@@ -161,6 +174,11 @@ impl LSPHandlers {
                     .entry(node.uri)
                     .or_default()
                     .insert(node.key, node.description);
+            }
+
+            for stage in stages {
+                info!("found stage: {:?}", &stage);
+                all_stages.insert(stage.key.clone(), stage);
             }
         }
 
@@ -195,6 +213,7 @@ impl LSPHandlers {
 
         let word =
             ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
+
         debug!("word: {}", word);
 
         let mut locations: Vec<LSPLocation> = vec![];
@@ -281,6 +300,7 @@ impl LSPHandlers {
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
+        let mut all_stages = self.stages.lock().unwrap();
 
         let mut uri = Url::parse(format!("file://{}/", root_dir).as_str())?;
         info!("uri: {}", &uri);
@@ -308,7 +328,9 @@ impl LSPHandlers {
         };
 
         info!("URI: {}", &uri);
-        if let Some((files, nodes)) = self.parser.parse_contents(&uri, &root_file_content, true) {
+        if let Some((files, nodes, stages)) =
+            self.parser.parse_contents(&uri, &root_file_content, true)
+        {
             for file in files {
                 info!("found file: {:?}", &file);
                 store.insert(file.path, file.content);
@@ -320,6 +342,11 @@ impl LSPHandlers {
                     .entry(node.uri)
                     .or_default()
                     .insert(node.key, node.description);
+            }
+
+            for stage in stages {
+                info!("found stage: {:?}", &stage);
+                all_stages.insert(stage.key.clone(), stage);
             }
         }
 
@@ -374,6 +401,30 @@ impl LSPHandlers {
         }
 
         error!("diagnostic params: {:?}", diagnostics);
+
+        let stages =
+            ParserUtils::get_all_stages(params.text_document.uri.to_string(), content.as_str());
+
+        let all_stages = self.stages.lock().unwrap();
+        error!("diagnostic - stages: {:?}", stages);
+
+        for stage in stages {
+            if all_stages.get(&stage.key).is_none() {
+                diagnostics.push(Diagnostic::new_simple(
+                    lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: stage.range.start.line,
+                            character: stage.range.start.character,
+                        },
+                        end: lsp_types::Position {
+                            line: stage.range.end.line,
+                            character: stage.range.end.character,
+                        },
+                    },
+                    format!("Stage: {} does not exist.", stage.key),
+                ));
+            }
+        }
 
         Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
             id: request.id,

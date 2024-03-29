@@ -94,7 +94,7 @@ pub struct GitlabRootNode {
 }
 
 #[derive(Debug)]
-pub struct GitlabExtend {
+pub struct GitlabElement {
     pub key: String,
     pub uri: String,
     pub range: Range,
