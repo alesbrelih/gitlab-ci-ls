@@ -17,7 +17,7 @@ use crate::{
 pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
-    nodes: Mutex<HashMap<String, String>>,
+    nodes: Mutex<HashMap<String, HashMap<String, String>>>,
     parser: parser::Parser,
 }
 
@@ -102,10 +102,6 @@ impl LSPHandlers {
         let params =
             serde_json::from_value::<DidChangeTextDocumentParams>(notification.params).ok()?;
 
-        //TODO: need to clear everything
-        // also probaby restructure store a bit because else I would need to clear everything
-        // this way I just need to clear single URI entry
-
         if params.content_changes.len() != 1 {
             return None;
         }
@@ -113,10 +109,30 @@ impl LSPHandlers {
         // TODO: nodes
 
         let mut store = self.store.lock().unwrap();
-        store.insert(
-            params.text_document.uri.clone().into(),
-            params.content_changes.first().unwrap().text.clone(),
-        );
+        let mut all_nodes = self.nodes.lock().unwrap();
+        // reset previous
+        all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
+
+        if let Some((files, root_nodes)) = self.parser.parse_contents(
+            &params.text_document.uri,
+            &params.content_changes.first()?.text,
+            false,
+        ) {
+            for file in files {
+                store.insert(file.path, file.content);
+            }
+
+            for node in root_nodes {
+                info!("found node: {:?}", &node);
+
+                all_nodes
+                    .entry(node.uri)
+                    .or_default()
+                    .insert(node.key, node.description);
+            }
+        }
+
+        debug!("finished searching");
 
         None
     }
@@ -140,7 +156,11 @@ impl LSPHandlers {
 
             for node in root_nodes {
                 info!("found node: {:?}", &node);
-                all_nodes.insert(node.key, node.description);
+
+                all_nodes
+                    .entry(node.uri)
+                    .or_default()
+                    .insert(node.key, node.description);
             }
         }
 
@@ -284,12 +304,14 @@ impl LSPHandlers {
         let mut items: Vec<LSPCompletion> = vec![];
 
         // TODO: make it fuzzy
-        for (node_key, node_description) in nodes.iter() {
-            if node_key.starts_with('.') && node_key.contains(word) {
-                items.push(LSPCompletion {
-                    label: node_key.clone(),
-                    details: node_description.clone(),
-                })
+        for (_, node) in nodes.iter() {
+            for (node_key, node_description) in node.iter() {
+                if node_key.starts_with('.') && node_key.contains(word) {
+                    items.push(LSPCompletion {
+                        label: node_key.clone(),
+                        details: node_description.clone(),
+                    })
+                }
             }
         }
 
@@ -337,7 +359,10 @@ impl LSPHandlers {
 
             for node in nodes {
                 info!("found node: {:?}", &node);
-                all_nodes.insert(node.key, node.description);
+                all_nodes
+                    .entry(node.uri)
+                    .or_default()
+                    .insert(node.key, node.description);
             }
         }
 
@@ -367,10 +392,14 @@ impl LSPHandlers {
 
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
-        for extend in extends {
-            if extend.uri == params.text_document.uri.to_string()
-                && all_nodes.get(&extend.key).is_none()
-            {
+        'extend: for extend in extends {
+            if extend.uri == params.text_document.uri.to_string() {
+                for (_, root_nodes) in all_nodes.iter() {
+                    if root_nodes.get(&extend.key).is_some() {
+                        continue 'extend;
+                    }
+                }
+
                 diagnostics.push(Diagnostic::new_simple(
                     lsp_types::Range {
                         start: lsp_types::Position {

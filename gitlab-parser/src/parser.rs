@@ -93,7 +93,7 @@ impl ParserUtils {
         None
     }
 
-    fn get_all_root_nodes(content: &str) -> Vec<GitlabRootNode> {
+    fn get_all_root_nodes(uri: &str, content: &str) -> Vec<GitlabRootNode> {
         let mut nodes: Vec<GitlabRootNode> = vec![];
 
         let documents = match YamlLoader::load_from_str(content) {
@@ -118,6 +118,7 @@ impl ParserUtils {
                 emitter.dump(&Yaml::Hash(hash)).unwrap();
 
                 nodes.push(GitlabRootNode {
+                    uri: uri.to_string(),
                     key: key.as_str().unwrap().into(),
                     description,
                 })
@@ -237,7 +238,7 @@ impl Parser {
             content: content.into(),
         });
 
-        nodes.append(&mut ParserUtils::get_all_root_nodes(content));
+        nodes.append(&mut ParserUtils::get_all_root_nodes(uri.as_str(), content));
 
         let (_, value) = ParserUtils::get_root_node(content, "include")?;
 
@@ -363,7 +364,10 @@ impl Parser {
                 }
             };
 
-            nodes.append(&mut ParserUtils::get_all_root_nodes(content.as_str()));
+            nodes.append(&mut ParserUtils::get_all_root_nodes(
+                uri.as_str(),
+                content.as_str(),
+            ));
 
             files.push(GitlabFile {
                 path: uri.as_str().into(),
