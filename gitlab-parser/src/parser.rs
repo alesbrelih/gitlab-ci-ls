@@ -5,7 +5,7 @@ use log::{debug, error, info};
 use lsp_types::{Position, Url};
 use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
-use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
+use yaml_rust::{Yaml, YamlLoader};
 
 use crate::{GitlabElement, GitlabFile, GitlabRootNode, LSPPosition, ParseResults, Range};
 
@@ -42,13 +42,17 @@ impl ParserUtils {
         Some(&line[start..end])
     }
 
-    pub fn word_before_cursor(line: &str, char_index: usize) -> &str {
+    pub fn word_before_cursor(
+        line: &str,
+        char_index: usize,
+        predicate: fn(c: char) -> bool,
+    ) -> &str {
         if char_index == 0 || char_index > line.len() {
             return "";
         }
 
         let start = line[..char_index]
-            .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .rfind(predicate)
             .map_or(0, |index| index + 1);
 
         if start == char_index {
@@ -77,23 +81,45 @@ impl ParserUtils {
         None
     }
 
-    pub fn get_root_node(content: &str, node_key: &str) -> Option<(Yaml, Yaml)> {
-        let documents = match YamlLoader::load_from_str(content) {
-            Ok(_documents) => _documents,
-            Err(err) => {
-                error!("parsing yaml from: {:?} got: {:?}", content, err);
-                return None;
-            }
-        };
+    // Returns key and full node
+    pub fn get_root_node(content: &str, node_key: &str) -> Option<(String, String)> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
 
-        let content = &documents[0];
+        let query_source = format!(
+            r#"
+        (
+            stream(
+                document(
+                block_node(
+                    block_mapping(
+                    block_mapping_pair
+                        key: (flow_node(plain_scalar(string_scalar)@key))
+                    )@value
+                )
+                )
+            )
+            (#eq? @key "{}")
+        )
+        "#,
+            node_key
+        );
 
-        if let Yaml::Hash(root) = content {
-            for (key, value) in root {
-                if let Yaml::String(key_str) = key {
-                    if key_str.as_str().eq(node_key) {
-                        return Some((key.clone(), value.clone()));
-                    }
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), query_source.as_str()).unwrap();
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        for mat in matches.into_iter() {
+            for c in mat.captures {
+                if c.index == 1 {
+                    let text = &content[c.node.byte_range()];
+
+                    return Some((node_key.to_string(), text.to_string()));
                 }
             }
         }
@@ -102,38 +128,57 @@ impl ParserUtils {
     }
 
     fn get_all_root_nodes(uri: &str, content: &str) -> Vec<GitlabRootNode> {
-        let mut nodes: Vec<GitlabRootNode> = vec![];
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
 
-        let documents = match YamlLoader::load_from_str(content) {
-            Ok(_documents) => _documents,
-            Err(err) => {
-                error!("parsing yaml from: {:?} got: {:?}", content, err);
+        let query_source = r#"
+        (
+            stream(
+                document(
+                block_node(
+                    block_mapping(
+                    block_mapping_pair
+                        key: (flow_node(plain_scalar(string_scalar)@key))
+                    )@value
+                )
+                )
+            )
+        )
+        "#;
 
-                return nodes;
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), query_source).unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let mut root_nodes = vec![];
+        for m in matches.into_iter() {
+            let mut node = GitlabRootNode {
+                uri: uri.to_string(),
+                ..Default::default()
+            };
+            for c in m.captures {
+                let text = content[c.node.byte_range()].to_string();
+                match c.index {
+                    0 => {
+                        node.key = text;
+                    }
+                    1 => {
+                        node.description = text;
+                    }
+                    _ => {}
+                }
             }
-        };
 
-        let content = &documents[0];
-
-        if let Yaml::Hash(root) = content {
-            for (key, value) in root {
-                let mut description = String::new();
-                let mut hash = Hash::new();
-
-                hash.insert(key.clone(), value.clone());
-
-                let mut emitter = YamlEmitter::new(&mut description);
-                emitter.dump(&Yaml::Hash(hash)).unwrap();
-
-                nodes.push(GitlabRootNode {
-                    uri: uri.to_string(),
-                    key: key.as_str().unwrap().into(),
-                    description,
-                })
-            }
+            root_nodes.push(node);
         }
 
-        nodes
+        root_nodes
     }
 
     pub fn get_root_variables(uri: &str, content: &str) -> Vec<GitlabElement> {
@@ -575,75 +620,82 @@ impl Parser {
         }
 
         let (_, value) = ParserUtils::get_root_node(content, "include")?;
+        let documents = YamlLoader::load_from_str(value.as_str()).ok()?;
+        let content = &documents[0];
 
-        if let Yaml::Array(includes) = value {
-            for include in includes {
-                if let Yaml::Hash(item) = include {
-                    let mut remote_pkg = String::new();
-                    let mut remote_tag = String::new();
-                    let mut remote_files: Vec<String> = vec![];
+        if let Yaml::Hash(include_root) = content {
+            for (_, root) in include_root {
+                if let Yaml::Array(includes) = root {
+                    for include in includes {
+                        if let Yaml::Hash(item) = include {
+                            let mut remote_pkg = String::new();
+                            let mut remote_tag = String::new();
+                            let mut remote_files: Vec<String> = vec![];
 
-                    for (key, item_value) in item {
-                        if !remote_pkg.is_empty() {
-                            self.fetch_remote_files(
-                                parse_results,
-                                &remote_pkg,
-                                &remote_tag,
-                                &remote_files,
-                            );
-                        }
-
-                        if let Yaml::String(key_str) = key {
-                            match key_str.trim().to_lowercase().as_str() {
-                                "local" => {
-                                    if let Yaml::String(value) = item_value {
-                                        let current_uri = uri.join(value.as_str()).ok()?;
-                                        let current_content =
-                                            std::fs::read_to_string(current_uri.path()).ok()?;
-
-                                        if _follow {
-                                            self.parse_contents_recursive(
-                                                parse_results,
-                                                &current_uri,
-                                                &current_content,
-                                                _follow,
-                                                iteration + 1,
-                                            );
-                                        }
-                                    }
+                            for (key, item_value) in item {
+                                if _follow && !remote_pkg.is_empty() {
+                                    self.fetch_remote_files(
+                                        parse_results,
+                                        &remote_pkg,
+                                        &remote_tag,
+                                        &remote_files,
+                                    );
                                 }
-                                "project" => {
-                                    if let Yaml::String(value) = item_value {
-                                        remote_pkg = value.clone();
-                                    }
-                                }
-                                "ref" => {
-                                    if let Yaml::String(value) = item_value {
-                                        remote_tag = value.clone();
-                                    }
-                                }
-                                "file" => {
-                                    debug!("files: {:?}", item_value);
-                                    if let Yaml::Array(value) = item_value {
-                                        for yml in value {
-                                            if let Yaml::String(_path) = yml {
-                                                remote_files.push(_path);
+
+                                if let Yaml::String(key_str) = key {
+                                    match key_str.trim().to_lowercase().as_str() {
+                                        "local" => {
+                                            if let Yaml::String(value) = item_value {
+                                                let current_uri = uri.join(value.as_str()).ok()?;
+                                                let current_content =
+                                                    std::fs::read_to_string(current_uri.path())
+                                                        .ok()?;
+
+                                                if _follow {
+                                                    self.parse_contents_recursive(
+                                                        parse_results,
+                                                        &current_uri,
+                                                        &current_content,
+                                                        _follow,
+                                                        iteration + 1,
+                                                    );
+                                                }
                                             }
                                         }
+                                        "project" => {
+                                            if let Yaml::String(value) = item_value {
+                                                remote_pkg = value.clone();
+                                            }
+                                        }
+                                        "ref" => {
+                                            if let Yaml::String(value) = item_value {
+                                                remote_tag = value.clone();
+                                            }
+                                        }
+                                        "file" => {
+                                            debug!("files: {:?}", item_value);
+                                            if let Yaml::Array(value) = item_value {
+                                                for yml in value {
+                                                    if let Yaml::String(_path) = yml {
+                                                        remote_files.push(_path.to_string());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        _ => break,
                                     }
                                 }
-                                _ => break,
+                            }
+
+                            if _follow && !remote_pkg.is_empty() {
+                                self.fetch_remote_files(
+                                    parse_results,
+                                    &remote_pkg,
+                                    &remote_tag,
+                                    &remote_files,
+                                );
                             }
                         }
-                    }
-
-                    if !remote_pkg.is_empty() {
-                        self.fetch_remote_files(
-                            parse_results,
-                            &remote_pkg,
-                            &remote_tag,
-                            &remote_files,
-                        );
                     }
                 }
             }
@@ -773,10 +825,10 @@ impl Parser {
         env::set_var("GIT_HTTP_LOW_SPEED_TIME", "10");
 
         for origin in remotes {
-            info!("origin: {:?}", origin);
+            error!("origin: {:?}", origin);
             match builder.clone(format!("{}:{}", origin, remote_pkg).as_str(), dest) {
                 Ok(repo) => {
-                    info!("repository successfully cloned: {:?}", repo.path());
+                    error!("repository successfully cloned: {:?}", repo.path());
                     let (object, reference) =
                         repo.revparse_ext(remote_tag).expect("Object not found");
 
@@ -792,7 +844,7 @@ impl Parser {
                     break;
                 }
                 Err(err) => {
-                    info!("error cloning repo: {:?}", err);
+                    error!("error cloning repo: {:?}", err);
                     if dest.exists() {
                         fs::remove_dir_all(dest).expect("should be able to remove");
                     }

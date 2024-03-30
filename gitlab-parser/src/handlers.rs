@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::format, path::PathBuf, sync::Mutex, time::Instant};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Instant};
 
 use log::{debug, error, info};
 use lsp_server::{Notification, Request};
@@ -7,7 +7,7 @@ use lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams, HoverParams,
     Url,
 };
-use yaml_rust::{yaml::Hash, Yaml, YamlEmitter, YamlLoader};
+use yaml_rust::YamlLoader;
 
 use crate::{
     parser::{self, ParserUtils},
@@ -63,7 +63,6 @@ impl LSPHandlers {
             ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
 
         let mut hover = String::new();
-
         for (content_uri, content) in store.iter() {
             let (node_key, node_value) = match ParserUtils::get_root_node(content, word) {
                 Some((node_key, node_value)) => (node_key, node_value),
@@ -72,24 +71,15 @@ impl LSPHandlers {
 
             // Check if we found the same line that triggered the hover event and discard it
             // adding format : because yaml parser removes it from the key
-            if content_uri.ends_with(uri.as_str()) && line.eq(&format!("{}:", node_key.as_str()?)) {
+            if content_uri.ends_with(uri.as_str()) && line.eq(&format!("{}:", node_key.as_str())) {
                 continue;
             }
-
-            let mut current_hover = String::new();
-            let mut hash = Hash::new();
-            hash.insert(node_key, node_value);
-
-            let mut emitter = YamlEmitter::new(&mut current_hover);
-            emitter.dump(&Yaml::Hash(hash)).unwrap();
-
-            current_hover = current_hover.trim_start_matches("---\n").to_string();
 
             if !hover.is_empty() {
                 hover = format!("{}\r\n--------\r\n", hover);
             }
 
-            hover = format!("{}{}", hover, current_hover);
+            hover = format!("{}{}", hover, node_value);
         }
 
         if hover.is_empty() {
@@ -105,6 +95,7 @@ impl LSPHandlers {
     }
 
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {
+        let start = Instant::now();
         let params =
             serde_json::from_value::<DidChangeTextDocumentParams>(notification.params).ok()?;
 
@@ -156,6 +147,7 @@ impl LSPHandlers {
             }
         }
 
+        error!("ONCHANGE ELAPSED: {:?}", start.elapsed());
         debug!("finished searching");
 
         None
@@ -231,7 +223,8 @@ impl LSPHandlers {
         let mut locations: Vec<LSPLocation> = vec![];
 
         for (uri, content) in store.iter() {
-            info!("checking uri {}", uri);
+            error!("checking uri {}", uri);
+            error!("checking content {}", content);
             let documents = match YamlLoader::load_from_str(content) {
                 Ok(d) => d,
                 Err(err) => {
@@ -271,6 +264,8 @@ impl LSPHandlers {
     }
 
     pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
+        error!("GOT AUTOCOMPLETE REQ");
+        let start = Instant::now();
         let params: CompletionParams = serde_json::from_value(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
@@ -280,21 +275,21 @@ impl LSPHandlers {
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let word = ParserUtils::word_before_cursor(line, position.character as usize);
         let mut items: Vec<LSPCompletion> = vec![];
 
-        let start = Instant::now();
         let completion_type = ParserUtils::get_completion_type(document, position);
 
-        error!("ELAPSED: {:?}", start.elapsed());
-
-        let start = Instant::now();
         match completion_type {
             parser::CompletionType::None => return None,
             parser::CompletionType::Stage => {
                 error!("STAGE");
 
                 let stages = self.stages.lock().unwrap();
+                let word = ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c: char| c.is_whitespace(),
+                );
 
                 error!("stage: {:?}", stages.keys());
                 error!("word: {:?}", word);
@@ -311,6 +306,11 @@ impl LSPHandlers {
                 error!("EXTEND");
 
                 let nodes = self.nodes.lock().unwrap();
+                let word = ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c: char| c.is_whitespace(),
+                );
 
                 for (_, node) in nodes.iter() {
                     for (node_key, node_description) in node.iter() {
@@ -322,15 +322,19 @@ impl LSPHandlers {
                         }
                     }
                 }
-                error!("ELAPSED: {:?}", start.elapsed());
             }
             parser::CompletionType::Variable => {
                 error!("VARIABLE");
 
                 let variables = self.variables.lock().unwrap();
+                let word = ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c: char| c == '$',
+                );
 
                 for (variable, _) in variables.iter() {
-                    if format!("${}", variable).starts_with(word) {
+                    if variable.starts_with(word) {
                         items.push(LSPCompletion {
                             label: variable.clone(),
                             details: None,
@@ -340,8 +344,7 @@ impl LSPHandlers {
             }
         }
 
-        info!("got word: {}", word);
-
+        error!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Completion(crate::CompletionResult {
             id: request.id,
             list: items,
@@ -422,6 +425,7 @@ impl LSPHandlers {
     }
 
     pub fn on_diagnostic(&self, request: Request) -> Option<LSPResult> {
+        let start = Instant::now();
         let params = serde_json::from_value::<DocumentDiagnosticParams>(request.params).ok()?;
         let store = self.store.lock().unwrap();
         let all_nodes = self.nodes.lock().unwrap();
@@ -461,6 +465,7 @@ impl LSPHandlers {
 
         let stages =
             ParserUtils::get_all_stages(params.text_document.uri.to_string(), content.as_str());
+        error!("STAGES: {:?}", stages);
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -481,6 +486,7 @@ impl LSPHandlers {
             }
         }
 
+        error!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
             id: request.id,
             diagnostics,

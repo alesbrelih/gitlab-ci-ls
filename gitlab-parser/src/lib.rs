@@ -86,7 +86,7 @@ pub struct GitlabFile {
     pub content: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GitlabRootNode {
     pub uri: String,
     pub key: String,
