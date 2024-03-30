@@ -75,6 +75,11 @@ It shows diagnostics on:
 - invalid extends
 - invalid stages
 
+## Installing
+
+1. Download release and optionally symlink it.
+2. On mac you can use `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`.
+
 ## Build
 
 ```sh
