@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, DiagnosticServerCapabilities,
-    DocumentFilter, FullDocumentDiagnosticReport, Hover, HoverContents, LocationLink, MarkedString,
-    MarkupContent, Position, ServerCapabilities, TextDocumentSyncKind, Url,
-    WorkDoneProgressOptions,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit,
+    DiagnosticServerCapabilities, DocumentFilter, FullDocumentDiagnosticReport, Hover,
+    HoverContents, LocationLink, MarkedString, MarkupContent, Position, ServerCapabilities,
+    TextDocumentSyncKind, TextEdit, Url, WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
@@ -196,8 +196,23 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                                 let mut item = CompletionItem {
                                     label: c.label.clone(),
                                     kind: Some(CompletionItemKind::KEYWORD),
+                                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                        new_text: c.label.clone(),
+                                        range: lsp_types::Range {
+                                            start: Position {
+                                                line: c.location.range.start.line,
+                                                character: c.location.range.start.character,
+                                            },
+                                            end: Position {
+                                                line: c.location.range.end.line,
+                                                character: c.location.range.end.character,
+                                            },
+                                        },
+                                    })),
                                     ..Default::default()
                                 };
+
+                                error!("compeltionItem: {:?}", &item.text_edit);
 
                                 if let Some(documentation) = c.details.clone() {
                                     item.documentation = Some(

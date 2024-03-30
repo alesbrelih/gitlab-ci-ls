@@ -130,4 +130,5 @@ This extension supports configuration which needs to be set up because _gitlab-l
 ## TODO
 
 [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
-[ ] Fix VSCode completion. It seems it also needs a range to correctly update text.
+[ x ] Fix VSCode completion. It seems it also needs a range to correctly update text.
+[ ] Rename to gitlab-ci-ls.

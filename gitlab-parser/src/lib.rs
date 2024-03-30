@@ -6,13 +6,13 @@ use lsp_types::Diagnostic;
 pub mod handlers;
 mod parser;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LSPPosition {
     pub line: u32,
     pub character: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Range {
     pub start: LSPPosition,
     pub end: LSPPosition,
@@ -34,9 +34,10 @@ pub struct CompletionResult {
 pub struct LSPCompletion {
     pub label: String,
     pub details: Option<String>,
+    pub location: LSPLocation,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LSPLocation {
     pub uri: String,
     pub range: Range,

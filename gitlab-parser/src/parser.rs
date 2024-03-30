@@ -553,6 +553,21 @@ impl ParserUtils {
 
         CompletionType::None
     }
+
+    pub fn word_after_cursor(line: &str, char_index: usize) -> &str {
+        if char_index >= line.len() {
+            return "";
+        }
+
+        let start = char_index;
+
+        let end = line[start..]
+            .char_indices()
+            .find(|&(_, c)| c.is_whitespace())
+            .map_or(line.len(), |(idx, _)| start + idx);
+
+        &line[start..end]
+    }
 }
 
 impl Parser {

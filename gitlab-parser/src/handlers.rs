@@ -299,14 +299,29 @@ impl LSPHandlers {
                     position.character as usize,
                     |c: char| c.is_whitespace(),
                 );
+                let after = ParserUtils::word_after_cursor(line, position.character as usize);
 
                 error!("stage: {:?}", stages.keys());
                 error!("word: {:?}", word);
+
                 for (stage, _) in stages.iter() {
                     if stage.contains(word) {
                         items.push(LSPCompletion {
                             label: stage.clone(),
                             details: None,
+                            location: LSPLocation {
+                                range: crate::Range {
+                                    start: crate::LSPPosition {
+                                        line: position.line,
+                                        character: position.character - word.len() as u32,
+                                    },
+                                    end: crate::LSPPosition {
+                                        line: position.line,
+                                        character: position.character + after.len() as u32,
+                                    },
+                                },
+                                ..Default::default()
+                            },
                         })
                     }
                 }
@@ -321,12 +336,27 @@ impl LSPHandlers {
                     |c: char| c.is_whitespace(),
                 );
 
+                let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
                 for (_, node) in nodes.iter() {
                     for (node_key, node_description) in node.iter() {
                         if node_key.starts_with('.') && node_key.contains(word) {
                             items.push(LSPCompletion {
                                 label: node_key.clone(),
                                 details: Some(node_description.clone()),
+                                location: LSPLocation {
+                                    range: crate::Range {
+                                        start: crate::LSPPosition {
+                                            line: position.line,
+                                            character: position.character - word.len() as u32,
+                                        },
+                                        end: crate::LSPPosition {
+                                            line: position.line,
+                                            character: position.character + after.len() as u32,
+                                        },
+                                    },
+                                    ..Default::default()
+                                },
                             })
                         }
                     }
@@ -342,11 +372,26 @@ impl LSPHandlers {
                     |c: char| c == '$',
                 );
 
+                let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
                 for (variable, _) in variables.iter() {
                     if variable.starts_with(word) {
                         items.push(LSPCompletion {
                             label: variable.clone(),
                             details: None,
+                            location: LSPLocation {
+                                range: crate::Range {
+                                    start: crate::LSPPosition {
+                                        line: position.line,
+                                        character: position.character - word.len() as u32,
+                                    },
+                                    end: crate::LSPPosition {
+                                        line: position.line,
+                                        character: position.character + after.len() as u32,
+                                    },
+                                },
+                                ..Default::default()
+                            },
                         })
                     }
                 }
