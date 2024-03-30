@@ -1,9 +1,8 @@
-# Gitlab language server
+# Gitlab CI language server
 
 ## **This is not an official language server.**
 
-I've developed this LSP to avoid manually searching for extend definitions and
-navigating to code that is held in remote files.
+I've developed this LS to help myself working with Gitlab CI files.
 
 ## Functionalities
 
@@ -12,8 +11,21 @@ Currently it supports only:
 - _textDocument/definition_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition)
 - _textDocument/hover_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
 - _textDocument/completion_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
+- _textDocument/diagnostic_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_diagnostic)
 
-## Definition
+### Go To Definition
+
+Both extend and main node keys support go to definition.
+
+```yaml
+.base-job:
+  something: ...
+
+myjob:
+  extends: .base-job
+```
+
+In the case above go to definition is supported for _.base-job_ and _myjob_ (if this is just an override of existing job).
 
 For remote file includes it tries to download referenced git repository and
 then use its files to jump to definition.
@@ -48,13 +60,28 @@ include:
 Otherwise it will clone from the first remote it has access to which
 doesn't guarantee that this is the file version you want.
 
+### Autocomplete
+
+It supports autocompletion for:
+
+- extends
+- stages
+- variables (currently only root variables, per job definition will be added later on)
+
+### Diagnostic
+
+It shows diagnostics on:
+
+- invalid extends
+- invalid stages
+
 ## Build
 
 ```sh
 cargo build --release
 ```
 
-Executable can then be found at _target/release/gitlab-ls_
+Executable can then be found at _target/release/gitlab-ci-ls_
 
 ## Integration with Neovim
 
@@ -80,11 +107,11 @@ vim.api.nvim_create_autocmd("FileType", {
 
     if not client then
       client = vim.lsp.start_client({
-        name = "gitlab-lsp",
+        name = "gitlab-ci-ls",
         cmd = { "/path-to-gitlab-ci-ls" },
         init_options = {
           cache = "/path/where/remote/folders/will/be/cached",
-          log_path = "/tmp/gitlab-lsp.log",
+          log_path = "/tmp/gitlab-ci-ls.log",
         },
         root_dir = root_dir,
         on_attach = require("lazyvim.plugins.lsp.keymaps").on_attach,
@@ -123,7 +150,7 @@ vsce package
 
 This command will output .vsix file that can then be imported to vscode extensions like described [here](https://code.visualstudio.com/docs/editor/extension-marketplace#_install-from-a-vsix).
 
-This extension supports configuration which needs to be set up because _gitlab-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases or built from source.
+This extension supports configuration which needs to be set up because _gitlab-ci-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases or built from source.
 
 ![vscode settings](./docs/images/vscode-settings.jpg)
 
@@ -131,4 +158,4 @@ This extension supports configuration which needs to be set up because _gitlab-l
 
 - [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
 - [x] Fix VSCode completion. It seems it also needs a range to correctly update text.
-- [ ] Rename to gitlab-ci-ls.
+- [x] Rename to gitlab-ci-ls.
