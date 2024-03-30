@@ -135,27 +135,9 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ## Integration with VSCode
 
-Extension hasn't been published to marketplace yet.
+Extenstion can be seen [here](https://marketplace.visualstudio.com/items?itemName=alesbrelih.gitlab-ci-ls).
 
-To use this extension you need to build and install it manually.
-
-First:
-
-```bash
-npm install -g @vscode/vsce
-```
-
-Then:
-
-```bash
-cd ./vscode-extension/
-npm install
-vsce package
-```
-
-This command will output .vsix file that can then be imported to vscode extensions like described [here](https://code.visualstudio.com/docs/editor/extension-marketplace#_install-from-a-vsix).
-
-This extension supports configuration which needs to be set up because _gitlab-ci-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases or built from source.
+This extension supports configuration which needs to be set up because _gitlab-ci-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases, brew or built from source.
 
 ![vscode settings](./docs/images/vscode-settings.jpg)
 
