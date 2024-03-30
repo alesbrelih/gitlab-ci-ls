@@ -122,7 +122,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // get_remote_urls(repo.remotes()?.iter())?;
 
     let lsp_events = LSPHandlers::new(gitlab_parser::LSPConfig {
-        cache_path: format!("{}/.gitlab-ls/cache/", std::env::var("HOME")?),
+        cache_path: format!("{}/.gitlab-ci-ls/cache/", std::env::var("HOME")?),
         package_map: init_params.initialization_options.package_map,
         remote_urls,
         root_dir: init_params.root_path,

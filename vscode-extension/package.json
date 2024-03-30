@@ -1,12 +1,12 @@
 {
-  "name": "gitlab-ls",
+  "name": "gitlab-ci-ls",
   "description": "A language server example",
   "author": "Ales Brelih",
   "license": "MIT",
   "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alesbrelih/gitlab-ls"
+    "url": "https://github.com/alesbrelih/gitlab-ci-ls"
   },
   "publisher": "alesbrelih",
   "categories": [],
@@ -27,12 +27,12 @@
       "properties": {
         "gitlabLs.executablePath": {
           "type": "string",
-          "default": "gitlab-ls",
+          "default": "gitlab-ci-ls",
           "description": "Path to the gitlab ls."
         },
         "gitlabLs.cachePath": {
           "type": "string",
-          "default": "~/.gitlab-ls/cache/",
+          "default": "~/.gitlab-ci-ls/cache/",
           "description": "Cache path for remote includes."
         },
         "gitlabLs.packageMap": {
@@ -42,7 +42,7 @@
         },
         "gitlabLs.logPath": {
           "type": "string",
-          "default": "/tmp/gitlab-ls.log",
+          "default": "/tmp/gitlab-ci-ls.log",
           "description": "Log path for the LS."
         }
       }
