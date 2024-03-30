@@ -20,6 +20,7 @@ pub struct LSPHandlers {
     nodes: Mutex<HashMap<String, HashMap<String, String>>>,
     stages: Mutex<HashMap<String, GitlabElement>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
+    indexing_in_progress: Mutex<bool>,
     parser: parser::Parser,
 }
 
@@ -29,6 +30,7 @@ impl LSPHandlers {
         let nodes = Mutex::new(HashMap::new());
         let stages = Mutex::new(HashMap::new());
         let variables = Mutex::new(HashMap::new());
+        let indexing_in_progress = Mutex::new(false);
 
         let events = LSPHandlers {
             cfg: cfg.clone(),
@@ -36,9 +38,11 @@ impl LSPHandlers {
             nodes,
             stages,
             variables,
+            indexing_in_progress,
             parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
         };
 
+        error!("IS IT ALWAYS NEW?");
         match events.index_workspace(events.cfg.root_dir.as_str()) {
             Ok(_) => {}
             Err(err) => {
@@ -154,8 +158,13 @@ impl LSPHandlers {
     }
 
     pub fn on_open(&self, notification: Notification) -> Option<LSPResult> {
+        let in_progress = self.indexing_in_progress.lock().unwrap();
+        drop(in_progress);
+
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
+
+        error!("ON_OPEN: {:?}", params.text_document.uri);
 
         debug!("started searching");
 
@@ -352,6 +361,11 @@ impl LSPHandlers {
     }
 
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
+        error!("LOCKING => INDEXING");
+
+        let mut in_progress = self.indexing_in_progress.lock().unwrap();
+        *in_progress = true;
+
         let start = Instant::now();
 
         let mut store = self.store.lock().unwrap();
