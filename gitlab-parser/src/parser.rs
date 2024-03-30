@@ -1,6 +1,5 @@
-use std::{collections::HashMap, env, fs, path::Path};
+use std::{collections::HashMap, env, fs, path, process::Command};
 
-use git2::{Cred, RemoteCallbacks};
 use log::{debug, error, info};
 use lsp_types::{Position, Url};
 use tree_sitter::{Query, QueryCursor};
@@ -774,6 +773,8 @@ impl Parser {
     }
 
     fn clone_repo(&self, repo_dest: &str, remote_tag: &str, remote_pkg: &str) {
+        // git clone --depth 1 --branch <tag_name> <repo_url>
+
         let repo_dest_path = std::path::Path::new(repo_dest);
 
         info!("repo_path: {:?}", repo_dest_path);
@@ -796,21 +797,6 @@ impl Parser {
             return;
         }
 
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(|_url, username_from_url, _allowed_paths| {
-            Cred::ssh_key_from_agent(username_from_url.unwrap())
-        });
-
-        let mut fo = git2::FetchOptions::new();
-        fo.remote_callbacks(callbacks);
-
-        debug!("remote tag {}", remote_tag);
-
-        // Prepare builder.
-        let mut builder = git2::build::RepoBuilder::new();
-        builder.fetch_options(fo);
-
-        // Clone the project.
         let remotes = match self.package_map.get(remote_pkg) {
             Some(host) => vec![host.to_string()],
             None => self.remote_urls.clone(),
@@ -818,40 +804,36 @@ impl Parser {
 
         info!("got git host: {:?}", remotes);
 
-        let dest = Path::new(repo_dest);
-        info!("clone dest {:?}", dest);
-
         env::set_var("GIT_HTTP_LOW_SPEED_LIMIT", "1000");
         env::set_var("GIT_HTTP_LOW_SPEED_TIME", "10");
 
         for origin in remotes {
-            error!("origin: {:?}", origin);
-            match builder.clone(format!("{}:{}", origin, remote_pkg).as_str(), dest) {
-                Ok(repo) => {
-                    error!("repository successfully cloned: {:?}", repo.path());
-                    let (object, reference) =
-                        repo.revparse_ext(remote_tag).expect("Object not found");
-
-                    repo.checkout_tree(&object, None)
-                        .expect("Failed to checkout");
-
-                    match reference {
-                        Some(gref) => repo.set_head(gref.name().unwrap()),
-                        None => repo.set_head_detached(object.id()),
-                    }
-                    .expect("Failed to set HEAD");
-
+            match Command::new("git")
+                .args([
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    remote_tag,
+                    format!("{}{}", origin, remote_pkg).as_str(),
+                    repo_dest,
+                ])
+                .output()
+            {
+                Ok(ok) => {
+                    error!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
                     break;
                 }
                 Err(err) => {
-                    error!("error cloning repo: {:?}", err);
+                    error!("error cloning to: {}, got: {:?}", repo_dest, err);
+
+                    let dest = path::Path::new(repo_dest);
                     if dest.exists() {
                         fs::remove_dir_all(dest).expect("should be able to remove");
                     }
-
                     continue;
                 }
-            }
+            };
         }
     }
 }

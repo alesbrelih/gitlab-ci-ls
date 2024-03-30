@@ -149,6 +149,7 @@ dependencies = [
  "log",
  "lsp-server",
  "lsp-types",
+ "regex",
  "serde",
  "serde_json",
  "simple-logging",

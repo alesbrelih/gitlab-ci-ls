@@ -1,7 +1,8 @@
 use git2::Repository;
 use gitlab_parser::handlers::LSPHandlers;
 use gitlab_parser::LSPResult;
-use log::{debug, error, info, warn, LevelFilter};
+use log::{error, info, warn, LevelFilter};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use lsp_server::{Connection, Message, Response};
@@ -108,8 +109,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         LevelFilter::Warn,
     )?;
 
-    info!("init_params {:?}", &init_params);
-
     let repo = Repository::open(&init_params.root_path)?;
     let remote_urls: Vec<String> = repo
         .remotes()?
@@ -117,15 +116,10 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         .flatten()
         .flat_map(|r_name| repo.find_remote(r_name))
         .filter_map(|remote| remote.url().map(|u| u.to_string()))
-        .filter_map(|remote| {
-            let split: Vec<&str> = remote.split(':').collect();
-            if split.len() == 2 {
-                Some(split[0].to_string())
-            } else {
-                None
-            }
-        })
+        .filter_map(get_remote_hosts)
         .collect();
+
+    // get_remote_urls(repo.remotes()?.iter())?;
 
     let lsp_events = LSPHandlers::new(gitlab_parser::LSPConfig {
         cache_path: format!("{}/.gitlab-ls/cache/", std::env::var("HOME")?),
@@ -134,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         root_dir: init_params.root_path,
     });
 
-    debug!("initialized");
+    info!("initialized");
 
     for msg in &connection.receiver {
         info!("received message {:?}", msg);
@@ -156,7 +150,10 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 "textDocument/definition" => lsp_events.on_definition(request),
                 "textDocument/completion" => lsp_events.on_completion(request),
                 "textDocument/diagnostic" => lsp_events.on_diagnostic(request),
-                "shutdown" => exit(0),
+                "shutdown" => {
+                    error!("SHUTDOWN!!");
+                    exit(0);
+                }
                 method => {
                     warn!("invalid request method: {:?}", method);
                     None
@@ -303,4 +300,32 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     io_threads.join()?;
 
     Ok(())
+}
+
+fn get_remote_hosts(remote: String) -> Option<String> {
+    let re = Regex::new(r"^(ssh://)?([^:/]+@[^:/]+(?::\d+)?[:/])").expect("Invalid REGEX");
+    let captures = re.captures(remote.as_str())?;
+
+    Some(captures[0].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_remote_urls_full_scheme() {
+        assert_eq!(
+            get_remote_hosts("ssh://git@something.host.online:4242/myrepo/wow.git".to_string()),
+            Some("ssh://git@something.host.online:4242/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_remote_urls_basic() {
+        assert_eq!(
+            get_remote_hosts("git@something.host.online:myrepo/wow.git".to_string()),
+            Some("git@something.host.online:".to_string())
+        );
+    }
 }

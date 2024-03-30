@@ -19,6 +19,7 @@ gitlab-parser = { version = "0.1.0", path = "./gitlab-parser" }
 git2.workspace = true
 tree-sitter.workspace = true
 tree-sitter-yaml.workspace = true
+regex = "1.10.4"
 
 [workspace.dependencies]
 log = "0.4.21"
