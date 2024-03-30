@@ -64,32 +64,36 @@ interest I will be add it.
 If you want to include it to test it you can use:
 
 ```lua
+local client = nil
+
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "yaml",
   callback = function(_)
     local root_dir = vim.fs.find(".git", { upward = true, path = vim.fn.expand("%:p:h") })[1]
-
+    vim.notify(root_dir)
     if root_dir then
       root_dir = vim.fn.fnamemodify(root_dir, ":h")
+      vim.notify(root_dir)
+    else
+      root_dir = vim.fn.expand("%:p:h")
     end
 
-    local client = vim.lsp.start_client({
-      name = "gitlab-ls",
-      cmd = { "path-to-gitlab-ls" },
-      init_options = {
-        cache = "path to cache folder that will hold remote files",
-        log_path = "logging directory",
-        package_map = {
-          ["project_name"] = "sshuser@host",
-        },
-      },
-      root_dir = root_dir,
-      on_attach = require("lazyvim.plugins.lsp.keymaps").on_attach,
-    })
-
     if not client then
-      vim.notify("error creating LSP config")
-      return
+      client = vim.lsp.start_client({
+        name = "gitlab-lsp",
+        cmd = { "/path-to-gitlab-ci-ls" },
+        init_options = {
+          cache = "/path/where/remote/folders/will/be/cached",
+          log_path = "/tmp/gitlab-lsp.log",
+        },
+        root_dir = root_dir,
+        on_attach = require("lazyvim.plugins.lsp.keymaps").on_attach,
+      })
+
+      if not client then
+        vim.notify("error creating LSP config")
+        return
+      end
     end
 
     vim.lsp.buf_attach_client(0, client)
