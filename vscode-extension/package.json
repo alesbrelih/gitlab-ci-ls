@@ -1,9 +1,9 @@
 {
   "name": "gitlab-ci-ls",
-  "description": "A language server example",
+  "description": "Gitlab CI Language Server",
   "author": "Ales Brelih",
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/alesbrelih/gitlab-ci-ls"
@@ -49,17 +49,18 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -b",
-    "watch": "tsc -b -w",
-    "lint": "eslint ./client/src --ext .ts,.tsx",
-    "postinstall": "cd client && npm install"
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./client/src/extension.ts --bundle --outfile=./client/out/extension.js --external:vscode --format=cjs --platform=node",
+    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
+    "test-compile": "tsc -p ./"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
     "@types/node": "^18.14.6",
     "@typescript-eslint/eslint-plugin": "^7.1.0",
     "@typescript-eslint/parser": "^7.1.0",
+    "esbuild": "^0.20.2",
     "eslint": "^8.57.0",
     "mocha": "^10.3.0",
     "typescript": "^5.3.3"
