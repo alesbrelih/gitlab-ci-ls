@@ -126,3 +126,8 @@ This command will output .vsix file that can then be imported to vscode extensio
 This extension supports configuration which needs to be set up because _gitlab-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases or built from source.
 
 ![vscode settings](./docs/images/vscode-settings.jpg)
+
+## TODO
+
+[ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
+[ ] Fix VSCode completion. It seems it also needs a range to correctly update text.
