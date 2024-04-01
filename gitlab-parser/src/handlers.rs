@@ -42,7 +42,6 @@ impl LSPHandlers {
             parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
         };
 
-        error!("IS IT ALWAYS NEW?");
         match events.index_workspace(events.cfg.root_dir.as_str()) {
             Ok(_) => {}
             Err(err) => {
@@ -150,8 +149,7 @@ impl LSPHandlers {
             }
         }
 
-        error!("ONCHANGE ELAPSED: {:?}", start.elapsed());
-        debug!("finished searching");
+        info!("ONCHANGE ELAPSED: {:?}", start.elapsed());
 
         None
     }
@@ -162,10 +160,6 @@ impl LSPHandlers {
 
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
-
-        error!("ON_OPEN: {:?}", params.text_document.uri);
-
-        debug!("started searching");
 
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
@@ -224,7 +218,6 @@ impl LSPHandlers {
 
         for (uri, content) in store.iter() {
             if let Some(element) = ParserUtils::get_root_node(uri, content, word) {
-                error!("ELEMENT: {:?}", element);
                 if document_uri.as_str().ends_with(uri)
                     && line.eq(&format!("{}:", element.key.as_str()))
                 {
@@ -245,7 +238,6 @@ impl LSPHandlers {
     }
 
     pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
-        error!("GOT AUTOCOMPLETE REQ");
         let start = Instant::now();
         let params: CompletionParams = serde_json::from_value(request.params).ok()?;
 
@@ -264,8 +256,6 @@ impl LSPHandlers {
             parser::CompletionType::None => return None,
             parser::CompletionType::RootNode => {}
             parser::CompletionType::Stage => {
-                error!("STAGE");
-
                 let stages = self.stages.lock().unwrap();
                 let word = ParserUtils::word_before_cursor(
                     line,
@@ -273,9 +263,6 @@ impl LSPHandlers {
                     |c: char| c.is_whitespace(),
                 );
                 let after = ParserUtils::word_after_cursor(line, position.character as usize);
-
-                error!("stage: {:?}", stages.keys());
-                error!("word: {:?}", word);
 
                 for (stage, _) in stages.iter() {
                     if stage.contains(word) {
@@ -300,8 +287,6 @@ impl LSPHandlers {
                 }
             }
             parser::CompletionType::Extend => {
-                error!("EXTEND");
-
                 let nodes = self.nodes.lock().unwrap();
                 let word = ParserUtils::word_before_cursor(
                     line,
@@ -336,8 +321,6 @@ impl LSPHandlers {
                 }
             }
             parser::CompletionType::Variable => {
-                error!("VARIABLE");
-
                 let variables = self.variables.lock().unwrap();
                 let word = ParserUtils::word_before_cursor(
                     line,
@@ -371,7 +354,8 @@ impl LSPHandlers {
             }
         }
 
-        error!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
+        info!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
+
         Some(LSPResult::Completion(crate::CompletionResult {
             id: request.id,
             list: items,
@@ -379,8 +363,6 @@ impl LSPHandlers {
     }
 
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
-        error!("LOCKING => INDEXING");
-
         let mut in_progress = self.indexing_in_progress.lock().unwrap();
         *in_progress = true;
 
@@ -442,7 +424,7 @@ impl LSPHandlers {
             }
         }
 
-        error!("ELAPSED: {:?}", start.elapsed());
+        error!("INDEX WORKSPACE ELAPSED: {:?}", start.elapsed());
 
         Ok(())
     }
@@ -500,7 +482,6 @@ impl LSPHandlers {
 
         let stages =
             ParserUtils::get_all_stages(params.text_document.uri.to_string(), content.as_str());
-        error!("STAGES: {:?}", stages);
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -521,7 +502,7 @@ impl LSPHandlers {
             }
         }
 
-        error!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
+        info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
             id: request.id,
             diagnostics,
@@ -572,7 +553,7 @@ impl LSPHandlers {
             _ => {}
         }
 
-        error!("REFERENCES ELAPSED: {:?}", start.elapsed());
+        info!("REFERENCES ELAPSED: {:?}", start.elapsed());
 
         Some(LSPResult::References(ReferencesResult {
             id: request.id,

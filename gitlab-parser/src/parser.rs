@@ -880,7 +880,7 @@ impl Parser {
                 .output()
             {
                 Ok(ok) => {
-                    error!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
+                    info!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
                     break;
                 }
                 Err(err) => {

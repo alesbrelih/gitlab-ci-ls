@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     let initialization_params = connection.initialize(server_capabilities)?;
 
-    error!("params {:?}", initialization_params);
+    info!("params {:?}", initialization_params);
 
     let init_params = match serde_json::from_value::<InitializationParams>(initialization_params) {
         Ok(p) => p,
@@ -213,8 +213,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                                     })),
                                     ..Default::default()
                                 };
-
-                                error!("compeltionItem: {:?}", &item.text_edit);
 
                                 if let Some(documentation) = c.details.clone() {
                                     item.documentation = Some(
