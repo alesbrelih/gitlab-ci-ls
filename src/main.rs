@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         )),
         hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         definition_provider: Some(lsp_types::OneOf::Left(true)),
+        references_provider: Some(lsp_types::OneOf::Left(true)),
         completion_provider: Some(lsp_types::CompletionOptions {
             resolve_provider: Some(false),
             trigger_characters: Some(vec![".".to_string(), " ".to_string(), "$".to_string()]),
@@ -148,6 +149,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             Message::Request(request) => match request.method.as_str() {
                 "textDocument/hover" => lsp_events.on_hover(request),
                 "textDocument/definition" => lsp_events.on_definition(request),
+                "textDocument/references" => lsp_events.on_references(request),
                 "textDocument/completion" => lsp_events.on_completion(request),
                 "textDocument/diagnostic" => lsp_events.on_diagnostic(request),
                 "shutdown" => {
@@ -271,6 +273,46 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 let msg = Message::Response(Response {
                     id: definition_result.id,
+                    result: serde_json::to_value(locations).ok(),
+                    error: None,
+                });
+
+                connection.sender.send(msg)
+            }
+            Some(LSPResult::References(references_result)) => {
+                info!("send definition msg: {:?}", references_result);
+
+                let locations: Vec<LocationLink> = references_result
+                    .locations
+                    .iter()
+                    .map(|l| LocationLink {
+                        target_uri: Url::parse(&l.uri).unwrap(),
+                        origin_selection_range: None,
+                        target_selection_range: lsp_types::Range {
+                            start: Position {
+                                character: l.range.start.character,
+                                line: l.range.start.line,
+                            },
+                            end: Position {
+                                character: l.range.end.character,
+                                line: l.range.end.line,
+                            },
+                        },
+                        target_range: lsp_types::Range {
+                            start: Position {
+                                character: l.range.start.character,
+                                line: l.range.start.line,
+                            },
+                            end: Position {
+                                character: l.range.end.character,
+                                line: l.range.end.line,
+                            },
+                        },
+                    })
+                    .collect();
+
+                let msg = Message::Response(Response {
+                    id: references_result.id,
                     result: serde_json::to_value(locations).ok(),
                     error: None,
                 });

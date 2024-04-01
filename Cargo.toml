@@ -31,10 +31,7 @@ simple_logger = "4.3.3"
 tokio = "1.36.0"
 anyhow = "1.0.81"
 serde = "1.0.197"
-git2 = { version = "0.18.3", features = [
-  "vendored-libgit2",
-  "vendored-openssl",
-] }
+git2 = "0.18.3"
 tree-sitter = "0.20.10"
 tree-sitter-yaml = "*"
 

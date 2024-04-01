@@ -25,6 +25,12 @@ pub struct DefinitionResult {
 }
 
 #[derive(Debug)]
+pub struct ReferencesResult {
+    pub id: RequestId,
+    pub locations: Vec<GitlabElement>,
+}
+
+#[derive(Debug)]
 pub struct CompletionResult {
     pub id: RequestId,
     pub list: Vec<LSPCompletion>,
@@ -79,6 +85,7 @@ pub enum LSPResult {
     Completion(CompletionResult),
     Definition(DefinitionResult),
     Diagnostics(DiagnosticsResult),
+    References(ReferencesResult),
 }
 
 #[derive(Debug)]

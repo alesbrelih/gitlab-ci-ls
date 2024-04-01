@@ -20,6 +20,7 @@ pub enum CompletionType {
     Stage,
     Variable,
     None,
+    RootNode,
 }
 
 pub struct ParserUtils {}
@@ -381,37 +382,49 @@ impl ParserUtils {
         extends
     }
 
-    pub fn get_all_extends(uri: String, content: &str) -> Vec<GitlabElement> {
+    pub fn get_all_extends(
+        uri: String,
+        content: &str,
+        extend_name: Option<&str>,
+    ) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        let query_source = r#"
+        let mut search = "".to_string();
+        if extend_name.is_some() {
+            search = format!("(#eq? @value \"{}\")", extend_name.unwrap());
+        }
+
+        let query_source = format!(
+            r#"
         (
             block_mapping_pair
             key: (flow_node) @key
             value: [
                 (flow_node(plain_scalar(string_scalar))) @value
-                (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @item)))))
+                (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @value)))))
             ]
             (#eq? @key "extends")
+            {}
         )
-        "#;
+        "#,
+            search
+        );
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
-        let query = Query::new(language(), query_source).unwrap();
+        let query = Query::new(language(), &query_source).unwrap();
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut extends: Vec<GitlabElement> = vec![];
 
-        let valid_indexes: Vec<u32> = vec![1, 2];
         for mat in matches.into_iter() {
             for c in mat.captures {
-                if valid_indexes.contains(&c.index) {
+                if c.index == 1 {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
@@ -444,7 +457,7 @@ impl ParserUtils {
         extends
     }
 
-    pub fn get_completion_type(content: &str, position: Position) -> CompletionType {
+    pub fn get_position_type(content: &str, position: Position) -> CompletionType {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -521,6 +534,18 @@ impl ParserUtils {
                 ]
             (#any-of? @keyvariable "image" "before_script" "after_script" "script" "rules" "variables")
             )
+            (
+                stream(
+                    document(
+                        block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@rootnode))
+                            )
+                        )
+                    )
+                )
+            )
         "#;
 
         let tree = parser.parse(content, None).unwrap();
@@ -542,6 +567,7 @@ impl ParserUtils {
                         3 => return CompletionType::Stage,
                         4 => continue,
                         5 => return CompletionType::Variable,
+                        6 => return CompletionType::RootNode,
                         _ => {
                             error!("invalid index: {}", c.index);
                             CompletionType::None

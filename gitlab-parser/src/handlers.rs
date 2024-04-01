@@ -12,6 +12,7 @@ use yaml_rust::YamlLoader;
 use crate::{
     parser::{self, ParserUtils},
     DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
+    ReferencesResult,
 };
 
 pub struct LSPHandlers {
@@ -286,10 +287,11 @@ impl LSPHandlers {
 
         let mut items: Vec<LSPCompletion> = vec![];
 
-        let completion_type = ParserUtils::get_completion_type(document, position);
+        let completion_type = ParserUtils::get_position_type(document, position);
 
         match completion_type {
             parser::CompletionType::None => return None,
+            parser::CompletionType::RootNode => {}
             parser::CompletionType::Stage => {
                 error!("STAGE");
 
@@ -493,8 +495,11 @@ impl LSPHandlers {
             .get(&params.text_document.uri.to_string())?
             .to_string();
 
-        let extends =
-            ParserUtils::get_all_extends(params.text_document.uri.to_string(), content.as_str());
+        let extends = ParserUtils::get_all_extends(
+            params.text_document.uri.to_string(),
+            content.as_str(),
+            None,
+        );
 
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
@@ -549,6 +554,58 @@ impl LSPHandlers {
         Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
             id: request.id,
             diagnostics,
+        }))
+    }
+
+    pub fn on_references(&self, request: Request) -> Option<LSPResult> {
+        let start = Instant::now();
+
+        let params = serde_json::from_value::<lsp_types::ReferenceParams>(request.params).ok()?;
+
+        let store = self.store.lock().unwrap();
+        let document_uri = &params.text_document_position.text_document.uri;
+        let document = store.get::<String>(&document_uri.clone().into())?;
+
+        let position = params.text_document_position.position;
+        let line = document.lines().nth(position.line as usize)?;
+
+        let position_type = ParserUtils::get_position_type(document, position);
+        let mut references: Vec<GitlabElement> = vec![];
+
+        match position_type {
+            parser::CompletionType::Extend => {
+                let word = ParserUtils::extract_word(line, position.character as usize)?;
+
+                for (uri, content) in store.iter() {
+                    let mut extends =
+                        ParserUtils::get_all_extends(uri.to_string(), content.as_str(), Some(word));
+                    references.append(&mut extends);
+                }
+            }
+            parser::CompletionType::RootNode => {
+                let word = ParserUtils::extract_word(line, position.character as usize)?
+                    .trim_end_matches(':');
+
+                // currently support only those that are extends
+                if word.starts_with('.') {
+                    for (uri, content) in store.iter() {
+                        let mut extends = ParserUtils::get_all_extends(
+                            uri.to_string(),
+                            content.as_str(),
+                            Some(word),
+                        );
+                        references.append(&mut extends);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        error!("REFERENCES ELAPSED: {:?}", start.elapsed());
+
+        Some(LSPResult::References(ReferencesResult {
+            id: request.id,
+            locations: references,
         }))
     }
 }
