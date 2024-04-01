@@ -82,7 +82,7 @@ impl ParserUtils {
     }
 
     // Returns key and full node
-    pub fn get_root_node(content: &str, node_key: &str) -> Option<(String, String)> {
+    pub fn get_root_node(uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -93,12 +93,12 @@ impl ParserUtils {
         (
             stream(
                 document(
-                block_node(
-                    block_mapping(
-                    block_mapping_pair
-                        key: (flow_node(plain_scalar(string_scalar)@key))
-                    )@value
-                )
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@key))
+                        )@value
+                    )
                 )
             )
             (#eq? @key "{}")
@@ -119,7 +119,21 @@ impl ParserUtils {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
 
-                    return Some((node_key.to_string(), text.to_string()));
+                    return Some(GitlabElement {
+                        uri: uri.to_string(),
+                        key: node_key.to_string(),
+                        content: Some(text.to_string()),
+                        range: Range {
+                            start: LSPPosition {
+                                line: c.node.start_position().row as u32,
+                                character: c.node.start_position().column as u32,
+                            },
+                            end: LSPPosition {
+                                line: c.node.end_position().row as u32,
+                                character: c.node.end_position().column as u32,
+                            },
+                        },
+                    });
                 }
             }
         }
@@ -127,7 +141,7 @@ impl ParserUtils {
         None
     }
 
-    fn get_all_root_nodes(uri: &str, content: &str) -> Vec<GitlabRootNode> {
+    pub fn get_all_root_nodes(uri: &str, content: &str) -> Vec<GitlabRootNode> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -236,6 +250,7 @@ impl ParserUtils {
 
                     environments.push(GitlabElement {
                         key: text.to_owned(),
+                        content: None,
                         uri: uri.to_string(),
                         range: Range {
                             start: LSPPosition {
@@ -295,6 +310,7 @@ impl ParserUtils {
 
                     stages.push(GitlabElement {
                         key: text.to_owned(),
+                        content: None,
                         uri: uri.to_string(),
                         range: Range {
                             start: LSPPosition {
@@ -363,6 +379,7 @@ impl ParserUtils {
 
                     extends.push(GitlabElement {
                         key: text.to_owned(),
+                        content: None,
                         uri: uri.clone(),
                         range: Range {
                             start: LSPPosition {
@@ -438,6 +455,7 @@ impl ParserUtils {
 
                     extends.push(GitlabElement {
                         key: text.to_owned(),
+                        content: None,
                         uri: uri.clone(),
                         range: Range {
                             start: LSPPosition {
@@ -659,8 +677,8 @@ impl Parser {
             parse_results.stages = found_stages;
         }
 
-        let (_, value) = ParserUtils::get_root_node(content, "include")?;
-        let documents = YamlLoader::load_from_str(value.as_str()).ok()?;
+        let element = ParserUtils::get_root_node(uri.as_str(), content, "include")?;
+        let documents = YamlLoader::load_from_str(element.content?.as_str()).ok()?;
         let content = &documents[0];
 
         if let Yaml::Hash(include_root) = content {

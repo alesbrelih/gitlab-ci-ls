@@ -7,7 +7,6 @@ use lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams, HoverParams,
     Url,
 };
-use yaml_rust::YamlLoader;
 
 use crate::{
     parser::{self, ParserUtils},
@@ -69,22 +68,21 @@ impl LSPHandlers {
 
         let mut hover = String::new();
         for (content_uri, content) in store.iter() {
-            let (node_key, node_value) = match ParserUtils::get_root_node(content, word) {
-                Some((node_key, node_value)) => (node_key, node_value),
-                _ => continue,
-            };
+            if let Some(element) = ParserUtils::get_root_node(content_uri, content, word) {
+                // Check if we found the same line that triggered the hover event and discard it
+                // adding format : because yaml parser removes it from the key
+                if content_uri.ends_with(uri.as_str())
+                    && line.eq(&format!("{}:", element.key.as_str()))
+                {
+                    continue;
+                }
 
-            // Check if we found the same line that triggered the hover event and discard it
-            // adding format : because yaml parser removes it from the key
-            if content_uri.ends_with(uri.as_str()) && line.eq(&format!("{}:", node_key.as_str())) {
-                continue;
+                if !hover.is_empty() {
+                    hover = format!("{}\r\n--------\r\n", hover);
+                }
+
+                hover = format!("{}{}", hover, element.content?);
             }
-
-            if !hover.is_empty() {
-                hover = format!("{}\r\n--------\r\n", hover);
-            }
-
-            hover = format!("{}{}", hover, node_value);
         }
 
         if hover.is_empty() {
@@ -207,63 +205,36 @@ impl LSPHandlers {
         let store = self.store.lock().unwrap();
         let document_uri = params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&document_uri.clone().into())?;
-
         let position = params.text_document_position_params.position;
+
+        let position_type = ParserUtils::get_position_type(document, position);
+        match position_type {
+            parser::CompletionType::RootNode | parser::CompletionType::Extend => {}
+            _ => {
+                error!("invalid position type for goto def");
+                return None;
+            }
+        };
+
         let line = document.lines().nth(position.line as usize)?;
-
-        let split: Vec<&str> = line.trim().split(' ').map(|w| w.trim()).collect();
-
-        // Currently just support the extends keyword and - if its array of extends.
-        // Not sure if this conditional is even needed.
-        if split.len() > 2 {
-            debug!("invalid: {:?}", split);
-            return None;
-        }
-
-        if split.len() == 2 && split[0] != "extends:" && split[0] != "-" {
-            debug!("invalid: {:?}", split);
-            return None;
-        }
-
         let word =
             ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
-
-        debug!("word: {}", word);
 
         let mut locations: Vec<LSPLocation> = vec![];
 
         for (uri, content) in store.iter() {
-            error!("checking uri {}", uri);
-            error!("checking content {}", content);
-            let documents = match YamlLoader::load_from_str(content) {
-                Ok(d) => d,
-                Err(err) => {
-                    error!("error generating yaml from str, err: {}", err);
-
-                    return None;
+            if let Some(element) = ParserUtils::get_root_node(uri, content, word) {
+                error!("ELEMENT: {:?}", element);
+                if document_uri.as_str().ends_with(uri)
+                    && line.eq(&format!("{}:", element.key.as_str()))
+                {
+                    continue;
                 }
-            };
 
-            let yaml_content = &documents[0];
-
-            debug!("checking uri: {}", uri);
-
-            for (key, _) in yaml_content.as_hash()? {
-                if key.as_str()? == word {
-                    // shouldn't push when we use go to definition on a root node and this
-                    // is the same node
-                    // But we need to allow it because gitlab is based on inheritence
-                    if document_uri.as_str().ends_with(uri)
-                        && line.eq(&format!("{}:", key.as_str()?))
-                    {
-                        continue;
-                    }
-
-                    locations.push(LSPLocation {
-                        uri: uri.clone(),
-                        range: ParserUtils::find_position(content, word)?,
-                    });
-                }
+                locations.push(LSPLocation {
+                    uri: uri.clone(),
+                    range: element.range,
+                });
             }
         }
 
