@@ -43,6 +43,8 @@ fn default_log_path() -> String {
     "/dev/null".to_string()
 }
 
+// TODO: refactor and remove the next line :)
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
@@ -116,8 +118,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         .iter()
         .flatten()
         .flat_map(|r_name| repo.find_remote(r_name))
-        .filter_map(|remote| remote.url().map(|u| u.to_string()))
-        .filter_map(get_remote_hosts)
+        .filter_map(|remote| remote.url().map(std::string::ToString::to_string))
+        .filter_map(|remote| get_remote_hosts(remote.as_str()))
         .collect();
 
     // get_remote_urls(repo.remotes()?.iter())?;
@@ -161,8 +163,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     None
                 }
             },
-            m => {
-                warn!("unhandled message {:?}", m);
+            Message::Response(request) => {
+                warn!("unhandled message {:?}", request);
                 None
             }
         };
@@ -348,7 +350,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             Err(err) => {
                 error!("error sending: {:?}", err);
             }
-            Ok(_) => continue,
+            Ok(()) => continue,
         }
     }
 
@@ -357,9 +359,9 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-fn get_remote_hosts(remote: String) -> Option<String> {
+fn get_remote_hosts(remote: &str) -> Option<String> {
     let re = Regex::new(r"^(ssh://)?([^:/]+@[^:/]+(?::\d+)?[:/])").expect("Invalid REGEX");
-    let captures = re.captures(remote.as_str())?;
+    let captures = re.captures(remote)?;
 
     Some(captures[0].to_string())
 }
@@ -371,7 +373,7 @@ mod tests {
     #[test]
     fn test_get_remote_urls_full_scheme() {
         assert_eq!(
-            get_remote_hosts("ssh://git@something.host.online:4242/myrepo/wow.git".to_string()),
+            get_remote_hosts("ssh://git@something.host.online:4242/myrepo/wow.git"),
             Some("ssh://git@something.host.online:4242/".to_string())
         );
     }
@@ -379,7 +381,7 @@ mod tests {
     #[test]
     fn test_get_remote_urls_basic() {
         assert_eq!(
-            get_remote_hosts("git@something.host.online:myrepo/wow.git".to_string()),
+            get_remote_hosts("git@something.host.online:myrepo/wow.git"),
             Some("git@something.host.online:".to_string())
         );
     }

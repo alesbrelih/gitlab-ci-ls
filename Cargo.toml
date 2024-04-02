@@ -37,3 +37,7 @@ tree-sitter-yaml = "*"
 
 [workspace]
 members = ["gitlab-parser"]
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"

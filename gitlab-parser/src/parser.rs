@@ -62,6 +62,7 @@ impl ParserUtils {
         &line[start..char_index]
     }
 
+    #[allow(dead_code)]
     pub fn find_position(content: &str, word: &str) -> Option<Range> {
         for (line_num, line) in content.lines().enumerate() {
             if line.starts_with(word) {
@@ -486,7 +487,7 @@ impl ParserUtils {
         // 3. image variables
         // 4. before_script variables
         let query_source = r#"
-        
+
             (
                 block_mapping_pair
                 key: (flow_node) @keyextends
@@ -517,12 +518,12 @@ impl ParserUtils {
                         plain_scalar(string_scalar)  @keyvariable
                     )
                 )
-                value: 
+                value:
                 [
                     (
                         block_node(
                             block_mapping(block_mapping_pair
-                                value: 
+                                value:
                                     [
                                         (flow_node(flow_sequence(flow_node(double_quote_scalar)) ))
                                         (flow_node(double_quote_scalar))
