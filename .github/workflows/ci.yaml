@@ -1,0 +1,21 @@
+---
+
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  lint:
+    name: Lint the code.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Check code format
+        run: cargo fmt --check
+
+      - name: Lint the code
+        run: cargo clippy --all-targets --all-features
