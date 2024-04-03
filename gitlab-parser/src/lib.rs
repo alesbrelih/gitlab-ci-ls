@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use lsp_server::RequestId;
 use lsp_types::Diagnostic;
 
+mod git;
 pub mod handlers;
 mod parser;
+mod parser_utils;
 mod treesitter;
 
 #[derive(Debug, Default)]
@@ -71,7 +73,7 @@ pub enum LSPResult {
     References(ReferencesResult),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitlabFile {
     pub path: String,
     pub content: String,
@@ -99,4 +101,27 @@ pub struct LSPConfig {
     pub cache_path: String,
     pub package_map: HashMap<String, String>,
     pub remote_urls: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct LocalInclude {
+    pub path: String,
+}
+#[derive(Debug, Default)]
+pub struct RemoteInclude {
+    pub project: Option<String>,
+    pub reference: Option<String>,
+    pub file: Option<String>,
+}
+
+impl RemoteInclude {
+    pub fn is_valid(&self) -> bool {
+        self.project.is_some() && self.reference.is_some() && self.file.is_some()
+    }
+}
+
+#[derive(Debug)]
+pub struct IncludeInformation {
+    pub remote: Option<RemoteInclude>,
+    pub local: Option<LocalInclude>,
 }

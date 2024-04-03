@@ -4,10 +4,11 @@ use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 
 use crate::{
-    parser::{CompletionType, IncludeInformation, LocalInclude, RemoteInclude},
-    GitlabElement, LSPPosition, Range,
+    parser::CompletionType, GitlabElement, IncludeInformation, LSPPosition, LocalInclude, Range,
+    RemoteInclude,
 };
 
+// TODO: initialize tree only once
 pub trait Treesitter {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;

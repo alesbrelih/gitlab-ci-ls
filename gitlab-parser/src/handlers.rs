@@ -9,7 +9,8 @@ use lsp_types::{
 };
 
 use crate::{
-    parser::{self, ParserUtils},
+    parser::{self, Parser},
+    parser_utils::ParserUtils,
     treesitter::TreesitterImpl,
     DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation,
     LSPPosition, LSPResult, Range, ReferencesResult,
@@ -22,7 +23,7 @@ pub struct LSPHandlers {
     stages: Mutex<HashMap<String, GitlabElement>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
     indexing_in_progress: Mutex<bool>,
-    parser: parser::Parser,
+    parser: Box<dyn Parser>,
 }
 
 impl LSPHandlers {
@@ -40,12 +41,12 @@ impl LSPHandlers {
             stages,
             variables,
             indexing_in_progress,
-            parser: parser::Parser::new(
+            parser: Box::new(parser::ParserImpl::new(
                 cfg.remote_urls,
                 cfg.package_map,
                 cfg.cache_path,
                 Box::new(TreesitterImpl::new()),
-            ),
+            )),
         };
 
         match events.index_workspace(events.cfg.root_dir.as_str()) {
