@@ -57,7 +57,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         references_provider: Some(lsp_types::OneOf::Left(true)),
         completion_provider: Some(lsp_types::CompletionOptions {
             resolve_provider: Some(false),
-            trigger_characters: Some(vec![".".to_string(), " ".to_string(), "$".to_string()]),
+            trigger_characters: Some(vec![
+                ".".to_string(),
+                ":".to_string(),
+                " ".to_string(),
+                "$".to_string(),
+            ]),
             work_done_progress_options: WorkDoneProgressOptions {
                 work_done_progress: None,
             },
