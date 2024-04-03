@@ -3,6 +3,8 @@ name = "gitlab-ci-ls"
 version = "0.1.0"
 edition = "2021"
 repository = "https://github.com/alesbrelih/gitlab-ci-ls"
+description = "Language server for Gitlab CI"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -16,7 +18,7 @@ simple-logging.workspace = true
 simple_logger.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
-gitlab-parser = { version = "0.1.0", path = "./gitlab-parser" }
+gitlab-ci-ls-parser = { version = "0.1.0", path = "./gitlab-ci-ls-parser" }
 git2.workspace = true
 tree-sitter.workspace = true
 tree-sitter-yaml.workspace = true
@@ -37,7 +39,7 @@ tree-sitter = "0.20.10"
 tree-sitter-yaml = "*"
 
 [workspace]
-members = ["gitlab-parser"]
+members = ["gitlab-ci-ls-parser"]
 
 [lints.clippy]
 all = "deny"

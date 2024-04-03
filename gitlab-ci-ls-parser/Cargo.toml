@@ -1,7 +1,9 @@
 [package]
-name = "gitlab-parser"
+name = "gitlab-ci-ls-parser"
 version = "0.1.0"
 edition = "2021"
+description = "Parser for the Gitlab CI language server"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
