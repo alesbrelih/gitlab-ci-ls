@@ -14,6 +14,29 @@ pub struct Parser {
     remote_urls: Vec<String>,
 }
 
+#[derive(Debug)]
+pub struct LocalInclude {
+    pub path: String,
+}
+#[derive(Debug, Default)]
+pub struct RemoteInclude {
+    pub project: Option<String>,
+    pub reference: Option<String>,
+    pub file: Option<String>,
+}
+
+impl RemoteInclude {
+    pub fn is_valid(&self) -> bool {
+        self.project.is_some() && self.reference.is_some() && self.file.is_some()
+    }
+}
+
+#[derive(Debug)]
+pub struct IncludeInformation {
+    pub remote: Option<RemoteInclude>,
+    pub local: Option<LocalInclude>,
+}
+
 // TODO: rooot for the case of importing f9
 pub enum CompletionType {
     Extend,
@@ -21,11 +44,15 @@ pub enum CompletionType {
     Variable,
     None,
     RootNode,
+    Include(IncludeInformation),
 }
 
 pub struct ParserUtils {}
 
 impl ParserUtils {
+    pub fn strip_quotes(value: &str) -> &str {
+        value.trim_matches('\'').trim_matches('"')
+    }
     pub fn extract_word(line: &str, char_index: usize) -> Option<&str> {
         if char_index >= line.len() {
             return None;
@@ -60,26 +87,6 @@ impl ParserUtils {
         }
 
         &line[start..char_index]
-    }
-
-    #[allow(dead_code)]
-    pub fn find_position(content: &str, word: &str) -> Option<Range> {
-        for (line_num, line) in content.lines().enumerate() {
-            if line.starts_with(word) {
-                return Some(Range {
-                    start: LSPPosition {
-                        line: line_num as u32,
-                        character: 0,
-                    },
-                    end: LSPPosition {
-                        line: line_num as u32,
-                        character: word.len() as u32,
-                    },
-                });
-            }
-        }
-
-        None
     }
 
     // Returns key and full node
@@ -484,8 +491,10 @@ impl ParserUtils {
 
         // 1. extends
         // 2. stages
-        // 3. image variables
-        // 4. before_script variables
+        // 3. variables
+        // 4. root nodes
+        // 4. local includes
+        // 5. remote includes
         let query_source = r#"
 
             (
@@ -565,8 +574,84 @@ impl ParserUtils {
                     )
                 )
             )
+            (
+                stream(
+                    document(
+                        block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@local_include_key))
+                                    value: (
+                                        block_node(
+                                            block_sequence(
+                                                block_sequence_item(
+                                                    block_node(
+                                                        block_mapping(
+                                                            block_mapping_pair
+                                                                key: (flow_node(plain_scalar(string_scalar)@local_key))
+                                                                value: (flow_node)@local_value
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                (#eq? @local_include_key "include")
+                (#eq? @local_key "local")
+            )
+            (
+                stream(
+                    document(
+                        block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@remote_include_key))
+                                    value: (
+                                        block_node(
+                                            block_sequence(
+                                                block_sequence_item(
+                                                    block_node
+                                                    [
+                                                        (
+                                                            block_mapping(
+                                                                block_mapping_pair
+                                                                    key: (flow_node(plain_scalar(string_scalar)@project_key))
+                                                                    value: (flow_node(plain_scalar)@project_value)
+                                                            )
+                                                        )
+                                                        (
+                                                            block_mapping(
+                                                                block_mapping_pair
+                                                                    key: (flow_node(plain_scalar(string_scalar)@ref_key))
+                                                                    value: (flow_node(plain_scalar)@ref_value)
+                                                            )
+                                                        )
+                                                        (
+                                                            block_mapping(
+                                                            block_mapping_pair
+                                                                key: (flow_node(plain_scalar(string_scalar)@file_key))
+                                                                value: (block_node(block_sequence(block_sequence_item(flow_node)@file)))
+                                                            )
+                                                        )
+                                                    ]
+                                                )
+                                            )@item
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                (#eq? @remote_include_key "include")
+                (#eq? @ref_key "ref")
+                (#eq? @project_key "project")
+                (#eq? @file_key "file")
+            )
         "#;
-
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
@@ -574,24 +659,87 @@ impl ParserUtils {
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
+        let mut remote_include = RemoteInclude {
+            ..Default::default()
+        };
+
         for mat in matches.into_iter() {
-            for c in mat.captures {
-                if c.node.start_position().row <= position.line as usize
-                    && c.node.end_position().row >= position.line as usize
-                {
-                    match c.index {
-                        0 => continue,
-                        1 => return CompletionType::Extend,
-                        2 => continue,
-                        3 => return CompletionType::Stage,
-                        4 => continue,
-                        5 => return CompletionType::Variable,
-                        6 => return CompletionType::RootNode,
-                        _ => {
-                            error!("invalid index: {}", c.index);
-                            CompletionType::None
+            // If this is a remote reference capture, I need to capture multiple values
+            // reference,project,file
+            // because the way treesitter captures those groups it doesn't really capture all
+            // together but there are multiple capture groups I need to iterate over
+            // TODO: check treesitter if I can group to make this easier.. Perhaps some capture
+            // group is wrong.
+            let remote_include_indexes: Vec<u32> = vec![10, 11, 12, 13, 14, 15, 16, 17];
+            if mat
+                .captures
+                .iter()
+                .any(|c| remote_include_indexes.contains(&c.index))
+            {
+                for c in mat.captures {
+                    let bounding = match mat.captures.iter().find(|c| c.index == 17) {
+                        Some(b) => b,
+                        None => {
+                            error!("couldn't find index 17 even though its remote capture");
+
+                            return CompletionType::None;
                         }
                     };
+
+                    if bounding.node.start_position().row > position.line as usize
+                        && bounding.node.end_position().row < position.line as usize
+                    {
+                        continue;
+                    }
+
+                    match c.index {
+                        12 => {
+                            remote_include.project = Some(content[c.node.byte_range()].to_string())
+                        }
+                        14 => {
+                            remote_include.reference =
+                                Some(content[c.node.byte_range()].to_string())
+                        }
+                        16 => {
+                            if c.node.start_position().row == position.line as usize {
+                                remote_include.file =
+                                    Some(content[c.node.byte_range()].to_string());
+                            }
+                        }
+                        _ => continue,
+                    };
+                }
+
+                if remote_include.is_valid() {
+                    return CompletionType::Include(IncludeInformation {
+                        local: None,
+                        remote: Some(remote_include),
+                    });
+                }
+            } else {
+                for c in mat.captures {
+                    if c.node.start_position().row <= position.line as usize
+                        && c.node.end_position().row >= position.line as usize
+                    {
+                        match c.index {
+                            1 => return CompletionType::Extend,
+                            3 => return CompletionType::Stage,
+                            5 => return CompletionType::Variable,
+                            6 => return CompletionType::RootNode,
+                            9 => {
+                                return CompletionType::Include(IncludeInformation {
+                                    local: Some(LocalInclude {
+                                        path: content[c.node.byte_range()].to_string(),
+                                    }),
+                                    remote: None,
+                                })
+                            }
+                            _ => {
+                                error!("invalid index: {}", c.index);
+                                CompletionType::None
+                            }
+                        };
+                    }
                 }
             }
         }

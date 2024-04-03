@@ -10,8 +10,8 @@ use lsp_types::{
 
 use crate::{
     parser::{self, ParserUtils},
-    DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation, LSPResult,
-    ReferencesResult,
+    DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation,
+    LSPPosition, LSPResult, Range, ReferencesResult,
 };
 
 pub struct LSPHandlers {
@@ -201,35 +201,85 @@ impl LSPHandlers {
         let document = store.get::<String>(&document_uri.clone().into())?;
         let position = params.text_document_position_params.position;
 
-        let position_type = ParserUtils::get_position_type(document, position);
-        match position_type {
-            parser::CompletionType::RootNode | parser::CompletionType::Extend => {}
+        let mut locations: Vec<LSPLocation> = vec![];
+
+        match ParserUtils::get_position_type(document, position) {
+            parser::CompletionType::RootNode | parser::CompletionType::Extend => {
+                let line = document.lines().nth(position.line as usize)?;
+                let word = ParserUtils::extract_word(line, position.character as usize)?
+                    .trim_end_matches(':');
+
+                for (uri, content) in store.iter() {
+                    if let Some(element) = ParserUtils::get_root_node(uri, content, word) {
+                        if document_uri.as_str().ends_with(uri)
+                            && line.eq(&format!("{}:", element.key.as_str()))
+                        {
+                            continue;
+                        }
+
+                        locations.push(LSPLocation {
+                            uri: uri.clone(),
+                            range: element.range,
+                        });
+                    }
+                }
+            }
+            parser::CompletionType::Include(info) => {
+                if let Some(local) = info.local {
+                    let local = ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
+
+                    for (uri, _) in store.iter() {
+                        if uri.ends_with(local) {
+                            locations.push(LSPLocation {
+                                uri: uri.clone(),
+                                range: Range {
+                                    start: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                    end: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                },
+                            });
+
+                            break;
+                        }
+                    }
+                }
+                if let Some(remote) = info.remote {
+                    let file = remote.file?;
+                    let file = ParserUtils::strip_quotes(&file).trim_start_matches('/');
+
+                    let path = format!("{}/{}/{}", remote.project?, remote.reference?, file);
+
+                    for (uri, _) in store.iter() {
+                        if uri.ends_with(path.as_str()) {
+                            locations.push(LSPLocation {
+                                uri: uri.clone(),
+                                range: Range {
+                                    start: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                    end: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                },
+                            });
+
+                            break;
+                        }
+                    }
+                }
+            }
             _ => {
                 error!("invalid position type for goto def");
                 return None;
             }
         };
-
-        let line = document.lines().nth(position.line as usize)?;
-        let word =
-            ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
-
-        let mut locations: Vec<LSPLocation> = vec![];
-
-        for (uri, content) in store.iter() {
-            if let Some(element) = ParserUtils::get_root_node(uri, content, word) {
-                if document_uri.as_str().ends_with(uri)
-                    && line.eq(&format!("{}:", element.key.as_str()))
-                {
-                    continue;
-                }
-
-                locations.push(LSPLocation {
-                    uri: uri.clone(),
-                    range: element.range,
-                });
-            }
-        }
 
         Some(LSPResult::Definition(DefinitionResult {
             id: request.id,
@@ -254,6 +304,7 @@ impl LSPHandlers {
 
         match completion_type {
             parser::CompletionType::None => return None,
+            parser::CompletionType::Include(_) => return None,
             parser::CompletionType::RootNode => {}
             parser::CompletionType::Stage => {
                 let stages = self.stages.lock().unwrap();
