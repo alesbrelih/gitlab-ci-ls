@@ -8,14 +8,31 @@ use crate::{
     GitlabElement, GitlabRootNode, LSPPosition, Range,
 };
 
-pub struct Treesitter {}
+pub trait Treesitter {
+    fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
+    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabRootNode>;
+    fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
+    fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
+    fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement>;
+    fn get_all_extends(
+        &self,
+        uri: String,
+        content: &str,
+        extend_name: Option<&str>,
+    ) -> Vec<GitlabElement>;
+    fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
+}
 
-impl Treesitter {
+pub struct TreesitterImpl {}
+
+impl TreesitterImpl {
     pub fn new() -> Self {
-        Treesitter {}
+        Self {}
     }
+}
 
-    pub fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
+impl Treesitter for TreesitterImpl {
+    fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -82,7 +99,7 @@ impl Treesitter {
         None
     }
 
-    pub fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabRootNode> {
+    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabRootNode> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -136,7 +153,7 @@ impl Treesitter {
         root_nodes
     }
 
-    pub fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
+    fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -211,7 +228,7 @@ impl Treesitter {
         environments
     }
 
-    pub fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
+    fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -271,7 +288,7 @@ impl Treesitter {
         stages
     }
 
-    pub fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement> {
+    fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -340,7 +357,7 @@ impl Treesitter {
         extends
     }
 
-    pub fn get_all_extends(
+    fn get_all_extends(
         &self,
         uri: String,
         content: &str,
@@ -417,7 +434,7 @@ impl Treesitter {
         extends
     }
 
-    pub fn get_position_type(&self, content: &str, position: Position) -> CompletionType {
+    fn get_position_type(&self, content: &str, position: Position) -> CompletionType {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())

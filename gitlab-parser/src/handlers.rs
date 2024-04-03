@@ -10,6 +10,7 @@ use lsp_types::{
 
 use crate::{
     parser::{self, ParserUtils},
+    treesitter::TreesitterImpl,
     DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation,
     LSPPosition, LSPResult, Range, ReferencesResult,
 };
@@ -39,7 +40,12 @@ impl LSPHandlers {
             stages,
             variables,
             indexing_in_progress,
-            parser: parser::Parser::new(cfg.remote_urls, cfg.package_map, cfg.cache_path),
+            parser: parser::Parser::new(
+                cfg.remote_urls,
+                cfg.package_map,
+                cfg.cache_path,
+                Box::new(TreesitterImpl::new()),
+            ),
         };
 
         match events.index_workspace(events.cfg.root_dir.as_str()) {

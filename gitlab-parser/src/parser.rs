@@ -10,7 +10,7 @@ pub struct Parser {
     cache_path: String,
     package_map: HashMap<String, String>,
     remote_urls: Vec<String>,
-    treesitter: Treesitter,
+    treesitter: Box<dyn Treesitter>,
 }
 
 #[derive(Debug)]
@@ -110,12 +110,13 @@ impl Parser {
         remote_urls: Vec<String>,
         package_map: HashMap<String, String>,
         cache_path: String,
+        treesitter: Box<dyn Treesitter>,
     ) -> Parser {
         Parser {
             remote_urls,
             package_map,
             cache_path,
-            treesitter: Treesitter::new(),
+            treesitter,
         }
     }
 
