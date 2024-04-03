@@ -324,10 +324,6 @@ impl LSPHandlers {
         let completion_type = self.parser.get_position_type(document, position);
 
         match completion_type {
-            parser::CompletionType::None => return None,
-            parser::CompletionType::Include(_) => return None,
-            parser::CompletionType::Needs(_) => return None, // TODO: implement me
-            parser::CompletionType::RootNode => {}
             parser::CompletionType::Stage => {
                 let stages = self.stages.lock().unwrap();
                 let word = ParserUtils::word_before_cursor(
@@ -425,6 +421,43 @@ impl LSPHandlers {
                     }
                 }
             }
+            parser::CompletionType::Needs(_) => {
+                let nodes = self.nodes.lock().unwrap();
+                let word = ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c: char| c.is_whitespace(),
+                );
+                let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
+                error!("word: {}", word);
+
+                for (_, node) in nodes.iter() {
+                    for (node_key, node_description) in node.iter() {
+                        if !node_key.starts_with('.') && node_key.contains(word) {
+                            error!("FOUND: {}", node_key);
+                            items.push(LSPCompletion {
+                                label: node_key.clone(),
+                                details: Some(node_description.clone()),
+                                location: LSPLocation {
+                                    range: crate::Range {
+                                        start: crate::LSPPosition {
+                                            line: position.line,
+                                            character: position.character - word.len() as u32,
+                                        },
+                                        end: crate::LSPPosition {
+                                            line: position.line,
+                                            character: position.character + after.len() as u32,
+                                        },
+                                    },
+                                    ..Default::default()
+                                },
+                            })
+                        }
+                    }
+                }
+            }
+            _ => return None,
         }
 
         info!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
