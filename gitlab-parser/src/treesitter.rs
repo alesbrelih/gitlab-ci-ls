@@ -5,12 +5,12 @@ use tree_sitter_yaml::language;
 
 use crate::{
     parser::{CompletionType, IncludeInformation, LocalInclude, RemoteInclude},
-    GitlabElement, GitlabRootNode, LSPPosition, Range,
+    GitlabElement, LSPPosition, Range,
 };
 
 pub trait Treesitter {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
-    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabRootNode>;
+    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement>;
@@ -99,7 +99,7 @@ impl Treesitter for TreesitterImpl {
         None
     }
 
-    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabRootNode> {
+    fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -130,7 +130,7 @@ impl Treesitter for TreesitterImpl {
 
         let mut root_nodes = vec![];
         for m in matches.into_iter() {
-            let mut node = GitlabRootNode {
+            let mut node = GitlabElement {
                 uri: uri.to_string(),
                 ..Default::default()
             };
@@ -141,7 +141,7 @@ impl Treesitter for TreesitterImpl {
                         node.key = text;
                     }
                     1 => {
-                        node.description = text;
+                        node.content = Some(text);
                     }
                     _ => {}
                 }

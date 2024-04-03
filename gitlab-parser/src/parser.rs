@@ -4,7 +4,7 @@ use log::{debug, error, info};
 use lsp_types::{Position, Url};
 use yaml_rust::{Yaml, YamlLoader};
 
-use crate::{treesitter::Treesitter, GitlabElement, GitlabFile, GitlabRootNode, ParseResults};
+use crate::{treesitter::Treesitter, GitlabElement, GitlabFile, ParseResults};
 
 pub struct Parser {
     cache_path: String,
@@ -143,7 +143,7 @@ impl Parser {
 
     pub fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults> {
         let files: Vec<GitlabFile> = vec![];
-        let nodes: Vec<GitlabRootNode> = vec![];
+        let nodes: Vec<GitlabElement> = vec![];
         let stages: Vec<GitlabElement> = vec![];
         let variables: Vec<GitlabElement> = vec![];
 

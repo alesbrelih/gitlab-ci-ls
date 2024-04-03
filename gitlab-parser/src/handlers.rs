@@ -134,7 +134,7 @@ impl LSPHandlers {
                 all_nodes
                     .entry(node.uri)
                     .or_default()
-                    .insert(node.key, node.description);
+                    .insert(node.key, node.content?);
             }
 
             if !results.stages.is_empty() {
@@ -185,7 +185,7 @@ impl LSPHandlers {
                 all_nodes
                     .entry(node.uri)
                     .or_default()
-                    .insert(node.key, node.description);
+                    .insert(node.key, node.content?);
             }
 
             for stage in results.stages {
@@ -464,10 +464,12 @@ impl LSPHandlers {
 
             for node in results.nodes {
                 info!("found node: {:?}", &node);
+                let content = node.content.unwrap_or("".to_string());
+
                 all_nodes
                     .entry(node.uri)
                     .or_default()
-                    .insert(node.key, node.description);
+                    .insert(node.key, content);
             }
 
             for stage in results.stages {

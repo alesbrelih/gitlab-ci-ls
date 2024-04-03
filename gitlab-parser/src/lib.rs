@@ -96,13 +96,6 @@ pub struct GitlabFile {
 }
 
 #[derive(Debug, Default)]
-pub struct GitlabRootNode {
-    pub uri: String,
-    pub key: String,
-    pub description: String,
-}
-
-#[derive(Debug)]
 pub struct GitlabElement {
     pub key: String,
     pub content: Option<String>,
@@ -113,7 +106,7 @@ pub struct GitlabElement {
 #[derive(Debug)]
 pub struct ParseResults {
     pub files: Vec<GitlabFile>,
-    pub nodes: Vec<GitlabRootNode>,
+    pub nodes: Vec<GitlabElement>,
     pub stages: Vec<GitlabElement>,
     pub variables: Vec<GitlabElement>,
 }
