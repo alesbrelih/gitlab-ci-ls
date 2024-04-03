@@ -12,10 +12,16 @@ Currently it supports only:
 - _textDocument/hover_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
 - _textDocument/completion_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
 - _textDocument/diagnostic_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_diagnostic)
+- _textDocument/diagnostic_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_reference)
 
 ### Go To Definition
 
 Both extend and main node keys support go to definition.
+Supports:
+
+- node definitions
+- job extends
+- job needs
 
 ```yaml
 .base-job:
@@ -66,6 +72,7 @@ It supports autocompletion for:
 
 - extends
 - stages
+- job needs
 - variables (currently only root variables, per job definition will be added later on)
 
 ### Diagnostic
@@ -74,6 +81,13 @@ It shows diagnostics on:
 
 - invalid extends
 - invalid stages
+
+### References
+
+It shows references for:
+
+- node keys
+- extends
 
 ## Installing
 
