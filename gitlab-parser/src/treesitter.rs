@@ -40,7 +40,15 @@ impl Treesitter {
             node_key
         );
 
-        let tree = parser.parse(content, None).unwrap();
+        let tree = match parser.parse(content, None) {
+            Some(t) => t,
+            None => {
+                error!("could not parse treesitter Q; got Q:\n{}", query_source);
+
+                return None;
+            }
+        };
+
         let root_node = tree.root_node();
 
         let query = Query::new(language(), query_source.as_str()).unwrap();
