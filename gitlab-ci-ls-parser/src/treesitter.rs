@@ -61,7 +61,10 @@ impl Treesitter for TreesitterImpl {
         let tree = match parser.parse(content, None) {
             Some(t) => t,
             None => {
-                error!("could not parse treesitter Q; got Q:\n{}", query_source);
+                error!(
+                    "could not parse treesitter content; got content:\n{}",
+                    content
+                );
 
                 return None;
             }
@@ -69,7 +72,18 @@ impl Treesitter for TreesitterImpl {
 
         let root_node = tree.root_node();
 
-        let query = Query::new(language(), query_source.as_str()).unwrap();
+        let query = match Query::new(language(), query_source.as_str()) {
+            Ok(q) => q,
+            Err(err) => {
+                error!(
+                    "could not parse treesitter query; got content:\n{}\ngot error: {}",
+                    query_source, err,
+                );
+
+                return None;
+            }
+        };
+
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
