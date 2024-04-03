@@ -125,3 +125,8 @@ pub struct IncludeInformation {
     pub remote: Option<RemoteInclude>,
     pub local: Option<LocalInclude>,
 }
+
+#[derive(Debug)]
+pub struct NodeDefinition {
+    pub name: String,
+}

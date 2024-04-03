@@ -282,6 +282,20 @@ impl LSPHandlers {
                     }
                 }
             }
+            parser::CompletionType::Needs(node) => {
+                for (uri, content) in store.iter() {
+                    if let Some(element) = self.parser.get_root_node(
+                        uri,
+                        content,
+                        ParserUtils::strip_quotes(node.name.as_str()),
+                    ) {
+                        locations.push(LSPLocation {
+                            uri: uri.clone(),
+                            range: element.range,
+                        });
+                    }
+                }
+            }
             _ => {
                 error!("invalid position type for goto def");
                 return None;
@@ -312,6 +326,7 @@ impl LSPHandlers {
         match completion_type {
             parser::CompletionType::None => return None,
             parser::CompletionType::Include(_) => return None,
+            parser::CompletionType::Needs(_) => return None, // TODO: implement me
             parser::CompletionType::RootNode => {}
             parser::CompletionType::Stage => {
                 let stages = self.stages.lock().unwrap();

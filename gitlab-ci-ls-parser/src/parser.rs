@@ -7,7 +7,7 @@ use yaml_rust::{Yaml, YamlLoader};
 use crate::{
     git::{Git, GitImpl},
     treesitter::Treesitter,
-    GitlabElement, GitlabFile, IncludeInformation, ParseResults,
+    GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults,
 };
 
 pub trait Parser {
@@ -44,6 +44,7 @@ pub enum CompletionType {
     None,
     RootNode,
     Include(IncludeInformation),
+    Needs(NodeDefinition),
 }
 
 impl ParserImpl {

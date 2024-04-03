@@ -4,8 +4,8 @@ use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 
 use crate::{
-    parser::CompletionType, GitlabElement, IncludeInformation, LSPPosition, LocalInclude, Range,
-    RemoteInclude,
+    parser::CompletionType, GitlabElement, IncludeInformation, LSPPosition, LocalInclude,
+    NodeDefinition, Range, RemoteInclude,
 };
 
 // TODO: initialize tree only once
@@ -603,6 +603,27 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @project_key "project")
                 (#eq? @file_key "file")
             )
+            (
+                block_mapping_pair
+                    key: (flow_node)@needs_key
+                    value: (
+                    block_node(
+                        block_sequence(
+                        block_sequence_item(
+                            block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                key: (flow_node)@needs_job_key
+                                value: (flow_node)@needs_job_value
+                            )
+                            )
+                        )
+                        )
+                    )
+                )
+                (#eq? @needs_key "needs")
+                (#eq? @needs_job_key "job")
+            )
         "#;
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
@@ -686,8 +707,14 @@ impl Treesitter for TreesitterImpl {
                                     remote: None,
                                 })
                             }
+                            20 => {
+                                return CompletionType::Needs(NodeDefinition {
+                                    name: content[c.node.byte_range()].to_string(),
+                                })
+                            }
                             _ => {
                                 error!("invalid index: {}", c.index);
+
                                 CompletionType::None
                             }
                         };
