@@ -54,17 +54,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install gh
 
-      - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          gh release create $TAG_NAME \
-            --title "Release $TAG_NAME" \
-            --notes "Release notes for $TAG_NAME" \
-            --draft=false \
-            --prerelease=false
-
       - name: Download artifacts
         uses: actions/download-artifact@v3
         with:
