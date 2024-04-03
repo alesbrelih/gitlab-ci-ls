@@ -1,0 +1,92 @@
+name: Artifacts
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    name: Build and Release for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset_name: gitlab-ci-ls_linux.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset_name: gitlab-ci-ls_mac.tar.gz
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Package the executable
+        run: |
+          tar czvf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release gitlab-ci-ls
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          gh release create $TAG_NAME \
+            --title "Release $TAG_NAME" \
+            --notes "Release notes for $TAG_NAME" \
+            --draft=false \
+            --prerelease=false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          for artifact_dir in artifacts/*; do
+            if [ -d "$artifact_dir" ]; then
+              echo "Uploading assets from $artifact_dir"
+              for file in "$artifact_dir"/*; do
+                if [ -f "$file" ]; then
+                  echo "Uploading $file"
+                  gh release upload $TAG_NAME "$file" --clobber
+                else
+                  echo "Skipping $file because it is not a file"
+                fi
+              done
+            else
+              echo "Skipping $artifact_dir because it is not a directory"
+            fi
+          done
