@@ -51,24 +51,6 @@ pub struct LSPLocation {
 }
 
 #[derive(Debug)]
-pub struct LSPDiagnosticItem {
-    pub range: Range,
-    pub severity: String,
-    pub message: String,
-}
-
-#[derive(Debug)]
-pub struct LSPDiagnosticDocument {
-    pub uri: String,
-    pub items: Vec<LSPDiagnosticItem>,
-}
-
-#[derive(Debug)]
-pub struct LSPDiagnostic {
-    pub documents: Vec<LSPDiagnosticDocument>,
-}
-
-#[derive(Debug)]
 pub struct HoverResult {
     pub id: RequestId,
     pub content: String,
