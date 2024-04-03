@@ -5,6 +5,7 @@ use lsp_types::Diagnostic;
 
 pub mod handlers;
 mod parser;
+mod treesitter;
 
 #[derive(Debug, Default)]
 pub struct LSPPosition {

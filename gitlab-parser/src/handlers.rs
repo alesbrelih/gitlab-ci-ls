@@ -67,7 +67,7 @@ impl LSPHandlers {
 
         let mut hover = String::new();
         for (content_uri, content) in store.iter() {
-            if let Some(element) = ParserUtils::get_root_node(content_uri, content, word) {
+            if let Some(element) = self.parser.get_root_node(content_uri, content, word) {
                 // Check if we found the same line that triggered the hover event and discard it
                 // adding format : because yaml parser removes it from the key
                 if content_uri.ends_with(uri.as_str())
@@ -203,14 +203,14 @@ impl LSPHandlers {
 
         let mut locations: Vec<LSPLocation> = vec![];
 
-        match ParserUtils::get_position_type(document, position) {
+        match self.parser.get_position_type(document, position) {
             parser::CompletionType::RootNode | parser::CompletionType::Extend => {
                 let line = document.lines().nth(position.line as usize)?;
                 let word = ParserUtils::extract_word(line, position.character as usize)?
                     .trim_end_matches(':');
 
                 for (uri, content) in store.iter() {
-                    if let Some(element) = ParserUtils::get_root_node(uri, content, word) {
+                    if let Some(element) = self.parser.get_root_node(uri, content, word) {
                         if document_uri.as_str().ends_with(uri)
                             && line.eq(&format!("{}:", element.key.as_str()))
                         {
@@ -300,7 +300,7 @@ impl LSPHandlers {
 
         let mut items: Vec<LSPCompletion> = vec![];
 
-        let completion_type = ParserUtils::get_position_type(document, position);
+        let completion_type = self.parser.get_position_type(document, position);
 
         match completion_type {
             parser::CompletionType::None => return None,
@@ -499,7 +499,7 @@ impl LSPHandlers {
             .get(&params.text_document.uri.to_string())?
             .to_string();
 
-        let extends = ParserUtils::get_all_extends(
+        let extends = self.parser.get_all_extends(
             params.text_document.uri.to_string(),
             content.as_str(),
             None,
@@ -531,8 +531,9 @@ impl LSPHandlers {
             }
         }
 
-        let stages =
-            ParserUtils::get_all_stages(params.text_document.uri.to_string(), content.as_str());
+        let stages = self
+            .parser
+            .get_all_stages(params.text_document.uri.to_string(), content.as_str());
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -572,7 +573,7 @@ impl LSPHandlers {
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let position_type = ParserUtils::get_position_type(document, position);
+        let position_type = self.parser.get_position_type(document, position);
         let mut references: Vec<GitlabElement> = vec![];
 
         match position_type {
@@ -581,7 +582,8 @@ impl LSPHandlers {
 
                 for (uri, content) in store.iter() {
                     let mut extends =
-                        ParserUtils::get_all_extends(uri.to_string(), content.as_str(), Some(word));
+                        self.parser
+                            .get_all_extends(uri.to_string(), content.as_str(), Some(word));
                     references.append(&mut extends);
                 }
             }
@@ -592,7 +594,7 @@ impl LSPHandlers {
                 // currently support only those that are extends
                 if word.starts_with('.') {
                     for (uri, content) in store.iter() {
-                        let mut extends = ParserUtils::get_all_extends(
+                        let mut extends = self.parser.get_all_extends(
                             uri.to_string(),
                             content.as_str(),
                             Some(word),
