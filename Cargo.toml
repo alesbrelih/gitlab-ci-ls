@@ -36,7 +36,7 @@ anyhow = "1.0.81"
 serde = "1.0.197"
 git2 = "0.18.3"
 tree-sitter = "0.20.10"
-tree-sitter-yaml = "*"
+tree-sitter-yaml = "0.0.1"
 
 [workspace]
 members = ["gitlab-ci-ls-parser"]
