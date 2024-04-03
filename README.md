@@ -93,6 +93,7 @@ It shows references for:
 
 1. Download release and optionally symlink it.
 2. On mac you can use `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`.
+3. Using cargo `cargo install gitlab-ci-ls`
 
 ## Build
 
