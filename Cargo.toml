@@ -2,6 +2,7 @@
 name = "gitlab-ci-ls"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/alesbrelih/gitlab-ci-ls"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
