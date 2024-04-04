@@ -9,14 +9,13 @@ use lsp_types::{
     Position, Url,
 };
 
-use crate::{
-    parser::{self, Parser},
-    parser_utils::ParserUtils,
-    treesitter::TreesitterImpl,
-    DefinitionResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
-    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
+use super::{
+    parser, parser_utils, treesitter, CompletionResult, DefinitionResult, DiagnosticsResult,
+    GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig, LSPLocation,
+    LSPPosition, LSPResult, Range, ReferencesResult,
 };
 
+#[allow(clippy::module_name_repetitions)]
 pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
@@ -24,7 +23,7 @@ pub struct LSPHandlers {
     stages: Mutex<HashMap<String, GitlabElement>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
     indexing_in_progress: Mutex<bool>,
-    parser: Box<dyn Parser>,
+    parser: Box<dyn parser::Parser>,
 }
 
 impl LSPHandlers {
@@ -46,16 +45,13 @@ impl LSPHandlers {
                 cfg.remote_urls,
                 cfg.package_map,
                 cfg.cache_path,
-                Box::new(TreesitterImpl::new()),
+                Box::new(treesitter::TreesitterImpl::new()),
             )),
         };
 
-        match events.index_workspace(events.cfg.root_dir.as_str()) {
-            Ok(_) => {}
-            Err(err) => {
-                error!("error indexing workspace; err: {}", err);
-            }
-        };
+        if let Err(err) = events.index_workspace(events.cfg.root_dir.as_str()) {
+            error!("error indexing workspace; err: {}", err);
+        }
 
         events
     }
@@ -70,8 +66,8 @@ impl LSPHandlers {
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let word =
-            ParserUtils::extract_word(line, position.character as usize)?.trim_end_matches(':');
+        let word = parser_utils::ParserUtils::extract_word(line, position.character as usize)?
+            .trim_end_matches(':');
 
         let mut hover = String::new();
         for (content_uri, content) in store.iter() {
@@ -85,7 +81,7 @@ impl LSPHandlers {
                 }
 
                 if !hover.is_empty() {
-                    hover = format!("{}\r\n--------\r\n", hover);
+                    hover = format!("{hover}\r\n--------\r\n");
                 }
 
                 hover = format!("{}{}", hover, element.content?);
@@ -96,7 +92,7 @@ impl LSPHandlers {
             return None;
         }
 
-        hover = format!("```yaml \r\n{}\r\n```", hover);
+        hover = format!("```yaml \r\n{hover}\r\n```");
 
         Some(LSPResult::Hover(HoverResult {
             id: request.id,
@@ -215,10 +211,11 @@ impl LSPHandlers {
         match self.parser.get_position_type(document, position) {
             parser::PositionType::RootNode | parser::PositionType::Extend => {
                 let line = document.lines().nth(position.line as usize)?;
-                let word = ParserUtils::extract_word(line, position.character as usize)?
-                    .trim_end_matches(':');
+                let word =
+                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?
+                        .trim_end_matches(':');
 
-                for (uri, content) in store.iter() {
+                for (uri, content) in store {
                     if let Some(element) = self.parser.get_root_node(uri, content, word) {
                         if document_uri.as_str().ends_with(uri)
                             && line.eq(&format!("{}:", element.key.as_str()))
@@ -234,16 +231,16 @@ impl LSPHandlers {
                 }
             }
             parser::PositionType::Include(info) => {
-                if let Some(include) = self.on_definition_include(info, store) {
+                if let Some(include) = LSPHandlers::on_definition_include(info, store) {
                     locations.push(include);
                 }
             }
             parser::PositionType::Needs(node) => {
-                for (uri, content) in store.iter() {
+                for (uri, content) in store {
                     if let Some(element) = self.parser.get_root_node(
                         uri,
                         content,
-                        ParserUtils::strip_quotes(node.name.as_str()),
+                        parser_utils::ParserUtils::strip_quotes(node.name.as_str()),
                     ) {
                         locations.push(LSPLocation {
                             uri: uri.clone(),
@@ -265,7 +262,6 @@ impl LSPHandlers {
     }
 
     fn on_definition_include(
-        &self,
         info: IncludeInformation,
         store: &HashMap<String, String>,
     ) -> Option<LSPLocation> {
@@ -275,7 +271,8 @@ impl LSPHandlers {
                 remote: None,
                 remote_url: None,
             } => {
-                let local = ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
+                let local =
+                    parser_utils::ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
 
                 store
                     .keys()
@@ -300,7 +297,7 @@ impl LSPHandlers {
                 remote_url: None,
             } => {
                 let file = remote.file?;
-                let file = ParserUtils::strip_quotes(&file).trim_start_matches('/');
+                let file = parser_utils::ParserUtils::strip_quotes(&file).trim_start_matches('/');
 
                 let path = format!("{}/{}/{}", remote.project?, remote.reference?, file);
 
@@ -326,13 +323,13 @@ impl LSPHandlers {
                 remote: None,
                 remote_url: Some(remote_url),
             } => {
-                let path_hash = ParserUtils::remote_path_to_hash(ParserUtils::strip_quotes(
-                    remote_url.path.as_str(),
-                ));
+                let path_hash = parser_utils::ParserUtils::remote_path_to_hash(
+                    parser_utils::ParserUtils::strip_quotes(remote_url.path.as_str()),
+                );
 
                 store
                     .keys()
-                    .find(|uri| uri.ends_with(format!("_{}.yaml", path_hash).as_str()))
+                    .find(|uri| uri.ends_with(format!("_{path_hash}.yaml").as_str()))
                     .map(|uri| LSPLocation {
                         uri: uri.clone(),
                         range: Range {
@@ -372,7 +369,7 @@ impl LSPHandlers {
 
         info!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
 
-        Some(LSPResult::Completion(crate::CompletionResult {
+        Some(LSPResult::Completion(CompletionResult {
             id: request.id,
             list: items,
         }))
@@ -388,30 +385,34 @@ impl LSPHandlers {
             .lock()
             .map_err(|e| anyhow::anyhow!("failed to lock stages: {}", e))?;
 
-        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
-            c.is_whitespace()
-        });
-        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace(),
+        );
+        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
 
         let items = stages
             .keys()
             .filter(|stage| stage.contains(word))
-            .map(|stage| LSPCompletion {
-                label: stage.clone(),
-                details: None,
-                location: LSPLocation {
-                    range: crate::Range {
-                        start: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character - word.len() as u32,
+            .flat_map(|stage| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: stage.clone(),
+                    details: None,
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
+                            },
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                        end: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character + after.len() as u32,
-                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
+                })
             })
             .collect();
 
@@ -427,33 +428,41 @@ impl LSPHandlers {
             .lock()
             .map_err(|e| anyhow!("failed to lock nodes: {}", e))?;
 
-        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
-            c.is_whitespace()
-        });
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace(),
+        );
 
-        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
 
         let items = nodes
             .values()
             .flat_map(|n| n.iter())
             .filter(|(node_key, _)| node_key.starts_with('.') && node_key.contains(word))
-            .map(|(node_key, node_description)| LSPCompletion {
-                label: node_key.to_string(),
-                details: Some(node_description.to_string()),
-                location: LSPLocation {
-                    range: crate::Range {
-                        start: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character.saturating_sub(word.len() as u32),
+            .flat_map(
+                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
+                    Ok(LSPCompletion {
+                        label: node_key.to_string(),
+                        details: Some(node_description.to_string()),
+                        location: LSPLocation {
+                            range: Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position
+                                        .character
+                                        .saturating_sub(u32::try_from(word.len())?),
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character + u32::try_from(after.len())?,
+                                },
+                            },
+                            ..Default::default()
                         },
-                        end: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character + after.len() as u32,
-                        },
-                    },
-                    ..Default::default()
+                    })
                 },
-            })
+            )
             .collect();
 
         Ok(items)
@@ -469,30 +478,35 @@ impl LSPHandlers {
             .lock()
             .map_err(|e| anyhow!("failed to lock variables: {}", e))?;
 
-        let word =
-            ParserUtils::word_before_cursor(line, position.character as usize, |c: char| c == '$');
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c == '$',
+        );
 
-        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
 
         let items = variables
             .keys()
             .filter(|v| v.starts_with(word))
-            .map(|v| LSPCompletion {
-                label: v.clone(),
-                details: None,
-                location: LSPLocation {
-                    range: crate::Range {
-                        start: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character - word.len() as u32,
+            .flat_map(|v| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: v.clone(),
+                    details: None,
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
+                            },
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                        end: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character + after.len() as u32,
-                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
+                })
             })
             .collect();
 
@@ -508,32 +522,38 @@ impl LSPHandlers {
             .nodes
             .lock()
             .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
-        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
-            c.is_whitespace()
-        });
-        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace(),
+        );
+        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
 
         let items = nodes
             .values()
             .flat_map(|needs| needs.iter())
             .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
-            .map(|(node_key, node_description)| LSPCompletion {
-                label: node_key.clone(),
-                details: Some(node_description.clone()),
-                location: LSPLocation {
-                    range: crate::Range {
-                        start: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character - word.len() as u32,
+            .flat_map(
+                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
+                    Ok(LSPCompletion {
+                        label: node_key.clone(),
+                        details: Some(node_description.clone()),
+                        location: LSPLocation {
+                            range: Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position.character - u32::try_from(word.len())?,
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character + u32::try_from(after.len())?,
+                                },
+                            },
+                            ..Default::default()
                         },
-                        end: crate::LSPPosition {
-                            line: position.line,
-                            character: position.character + after.len() as u32,
-                        },
-                    },
-                    ..Default::default()
+                    })
                 },
-            })
+            )
             .collect();
 
         Ok(items)
@@ -550,7 +570,7 @@ impl LSPHandlers {
         let mut all_stages = self.stages.lock().unwrap();
         let mut all_variables = self.variables.lock().unwrap();
 
-        let mut uri = Url::parse(format!("file://{}/", root_dir).as_str())?;
+        let mut uri = Url::parse(format!("file://{root_dir}/").as_str())?;
         info!("uri: {}", &uri);
 
         let list = std::fs::read_dir(root_dir)?;
@@ -584,7 +604,7 @@ impl LSPHandlers {
 
             for node in results.nodes {
                 info!("found node: {:?}", &node);
-                let content = node.content.unwrap_or("".to_string());
+                let content = node.content.unwrap_or(String::new());
 
                 all_nodes
                     .entry(node.uri)
@@ -608,6 +628,7 @@ impl LSPHandlers {
         Ok(())
     }
 
+    #[allow(clippy::unused_self)]
     pub fn on_save(&self, notification: Notification) -> Option<LSPResult> {
         let _params =
             serde_json::from_value::<DidSaveTextDocumentParams>(notification.params).ok()?;
@@ -710,7 +731,7 @@ impl LSPHandlers {
         }
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
-        Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
+        Some(LSPResult::Diagnostics(DiagnosticsResult {
             id: request.id,
             diagnostics,
         }))
@@ -733,7 +754,8 @@ impl LSPHandlers {
 
         match position_type {
             parser::PositionType::Extend => {
-                let word = ParserUtils::extract_word(line, position.character as usize)?;
+                let word =
+                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
 
                 for (uri, content) in store.iter() {
                     let mut extends =
@@ -743,8 +765,9 @@ impl LSPHandlers {
                 }
             }
             parser::PositionType::RootNode => {
-                let word = ParserUtils::extract_word(line, position.character as usize)?
-                    .trim_end_matches(':');
+                let word =
+                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?
+                        .trim_end_matches(':');
 
                 // currently support only those that are extends
                 if word.starts_with('.') {

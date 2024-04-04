@@ -7,10 +7,9 @@ use std::{
     time::Duration,
 };
 
+use super::{parser_utils, GitlabFile};
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
-
-use crate::{parser_utils::ParserUtils, GitlabFile};
 
 pub trait Git {
     fn clone_repo(&self, repo_dest: &str, remote_tag: &str, remote_pkg: &str);
@@ -23,6 +22,7 @@ pub trait Git {
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub struct GitImpl {
     package_map: HashMap<String, String>,
     remote_urls: Vec<String>,
@@ -36,8 +36,8 @@ impl GitImpl {
         cache_path: String,
     ) -> Self {
         Self {
-            remote_urls,
             package_map,
+            remote_urls,
             cache_path,
         }
     }
@@ -82,7 +82,7 @@ impl Git for GitImpl {
                     "1",
                     "--branch",
                     remote_tag,
-                    format!("{}{}", origin, remote_pkg).as_str(),
+                    format!("{origin}{remote_pkg}").as_str(),
                     repo_dest,
                 ])
                 .output()
@@ -123,7 +123,7 @@ impl Git for GitImpl {
 
         let mut files = vec![];
         for file in remote_files {
-            let file_path = format!("{}{}", repo_dest, file);
+            let file_path = format!("{repo_dest}{file}");
             debug!("filepath: {}", file_path);
 
             let content = match std::fs::read_to_string(&file_path) {
@@ -158,8 +158,8 @@ impl Git for GitImpl {
         std::fs::create_dir_all(&remote_cache_path)?;
 
         // check if file was changed
-        let file_hash = ParserUtils::remote_path_to_hash(url.as_str());
-        let file_name_pattern = format!("_{}.yaml", file_hash);
+        let file_hash = parser_utils::ParserUtils::remote_path_to_hash(url.as_str());
+        let file_name_pattern = format!("_{file_hash}.yaml");
 
         let dir_entry = fs::read_dir(&remote_cache_path)?
             .filter_map(Result::ok)
@@ -189,45 +189,42 @@ impl Git for GitImpl {
 
         let mut req = client.get(url);
         if let Some(etag) = &existing_etag {
-            req = req.header(IF_NONE_MATCH, format!("\"{}\"", etag));
+            req = req.header(IF_NONE_MATCH, format!("\"{etag}\""));
         }
 
-        let res = req.send()?;
+        let response = req.send()?;
 
-        match res.status() {
-            StatusCode::NOT_MODIFIED => {
-                let fpath = file_path.expect("File path must exist for NOT_MODIFIED response");
-                let content = fs::read_to_string(&fpath)?;
+        if response.status() == StatusCode::NOT_MODIFIED {
+            let fpath = file_path.expect("File path must exist for NOT_MODIFIED response");
+            let content = fs::read_to_string(&fpath)?;
 
-                info!("CACHED");
+            info!("CACHED");
 
-                Ok(GitlabFile {
-                    path: format!("file://{}", fpath.to_str().unwrap()),
-                    content,
-                })
-            }
-            _ => {
-                info!("NOT CACHED");
+            Ok(GitlabFile {
+                path: format!("file://{}", fpath.to_str().unwrap()),
+                content,
+            })
+        } else {
+            info!("NOT CACHED");
 
-                let headers = res.headers().clone();
-                let etag = headers.get("etag").unwrap().to_str()?;
-                let text = res.text()?;
+            let headers = response.headers().clone();
+            let etag = headers.get("etag").unwrap().to_str()?;
+            let text = response.text()?;
 
-                let path = format!(
-                    "{}/{}_{}.yaml",
-                    remote_cache_path,
-                    ParserUtils::strip_quotes(etag),
-                    file_hash
-                );
+            let path = format!(
+                "{}/{}_{}.yaml",
+                remote_cache_path,
+                parser_utils::ParserUtils::strip_quotes(etag),
+                file_hash
+            );
 
-                let mut file = File::create(&path)?;
-                file.write_all(text.as_bytes())?;
+            let mut file = File::create(&path)?;
+            file.write_all(text.as_bytes())?;
 
-                Ok(GitlabFile {
-                    path,
-                    content: text,
-                })
-            }
+            Ok(GitlabFile {
+                path,
+                content: text,
+            })
         }
     }
 }

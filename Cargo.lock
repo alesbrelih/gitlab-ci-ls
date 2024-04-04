@@ -287,29 +287,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "git2",
- "gitlab-ci-ls-parser",
  "log",
  "lsp-server",
  "lsp-types",
  "regex",
- "serde",
- "serde_json",
- "simple-logging",
- "simple_logger",
- "tokio",
- "tree-sitter",
- "tree-sitter-yaml",
-]
-
-[[package]]
-name = "gitlab-ci-ls-parser"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "git2",
- "log",
- "lsp-server",
- "lsp-types",
  "reqwest",
  "serde",
  "serde_json",

@@ -1,6 +1,4 @@
 use git2::Repository;
-use gitlab_ci_ls_parser::handlers::LSPHandlers;
-use gitlab_ci_ls_parser::{LSPConfig, LSPResult};
 use log::{error, info, warn, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -16,6 +14,8 @@ use lsp_types::{
 use std::collections::HashMap;
 use std::error::Error;
 use std::process::exit;
+
+mod gitlab_ci_ls_parser;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct InitializationOptions {
@@ -129,12 +129,13 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     // get_remote_urls(repo.remotes()?.iter())?;
 
-    let lsp_events = LSPHandlers::new(LSPConfig {
-        cache_path: format!("{}/.gitlab-ci-ls/cache/", std::env::var("HOME")?),
-        package_map: init_params.initialization_options.package_map,
-        remote_urls,
-        root_dir: init_params.root_path,
-    });
+    let lsp_events =
+        gitlab_ci_ls_parser::handlers::LSPHandlers::new(gitlab_ci_ls_parser::LSPConfig {
+            cache_path: format!("{}/.gitlab-ci-ls/cache/", std::env::var("HOME")?),
+            package_map: init_params.initialization_options.package_map,
+            remote_urls,
+            root_dir: init_params.root_path,
+        });
 
     info!("initialized");
 
@@ -177,7 +178,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         info!("got result {:?}", &result);
 
         let sent = match result {
-            Some(LSPResult::Hover(hover_result)) => {
+            Some(gitlab_ci_ls_parser::LSPResult::Hover(hover_result)) => {
                 info!("send hover msg: {:?}", hover_result);
 
                 let msg = Message::Response(Response {
@@ -192,7 +193,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 connection.sender.send(msg)
             }
-            Some(LSPResult::Completion(completion_result)) => {
+            Some(gitlab_ci_ls_parser::LSPResult::Completion(completion_result)) => {
                 info!("send completion msg: {:?}", completion_result);
 
                 let msg = Message::Response(Response {
@@ -244,7 +245,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 connection.sender.send(msg)
             }
-            Some(LSPResult::Definition(definition_result)) => {
+            Some(gitlab_ci_ls_parser::LSPResult::Definition(definition_result)) => {
                 info!("send definition msg: {:?}", definition_result);
 
                 let locations: Vec<LocationLink> = definition_result
@@ -284,7 +285,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 connection.sender.send(msg)
             }
-            Some(LSPResult::References(references_result)) => {
+            Some(gitlab_ci_ls_parser::LSPResult::References(references_result)) => {
                 info!("send definition msg: {:?}", references_result);
 
                 let locations: Vec<LocationLink> = references_result
@@ -324,7 +325,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
                 connection.sender.send(msg)
             }
-            Some(LSPResult::Diagnostics(diagnostics)) => {
+            Some(gitlab_ci_ls_parser::LSPResult::Diagnostics(diagnostics)) => {
                 let msg = Message::Response(Response {
                     id: diagnostics.id,
                     result: serde_json::to_value(FullDocumentDiagnosticReport {

@@ -4,10 +4,8 @@ use log::{debug, error};
 use lsp_types::{Position, Url};
 use yaml_rust::{Yaml, YamlLoader};
 
-use crate::{
-    git::{Git, GitImpl},
-    treesitter::Treesitter,
-    GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults,
+use super::{
+    git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults,
 };
 
 pub trait Parser {
@@ -37,9 +35,10 @@ pub trait Parser {
     ) -> Option<()>;
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub struct ParserImpl {
-    treesitter: Box<dyn Treesitter>,
-    git: Box<dyn Git>,
+    treesitter: Box<dyn treesitter::Treesitter>,
+    git: Box<dyn git::Git>,
 }
 
 // TODO: rooot for the case of importing f9
@@ -58,11 +57,11 @@ impl ParserImpl {
         remote_urls: Vec<String>,
         package_map: HashMap<String, String>,
         cache_path: String,
-        treesitter: Box<dyn Treesitter>,
+        treesitter: Box<dyn treesitter::Treesitter>,
     ) -> ParserImpl {
         ParserImpl {
             treesitter,
-            git: Box::new(GitImpl::new(remote_urls, package_map, cache_path)),
+            git: Box::new(git::GitImpl::new(remote_urls, package_map, cache_path)),
         }
     }
 
@@ -116,7 +115,7 @@ impl Parser for ParserImpl {
         self.treesitter.get_root_node(uri, content, node_key)
     }
 
-    fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults> {
+    fn parse_contents(&self, uri: &Url, content: &str, follow: bool) -> Option<ParseResults> {
         let files: Vec<GitlabFile> = vec![];
         let nodes: Vec<GitlabElement> = vec![];
         let stages: Vec<GitlabElement> = vec![];
@@ -129,17 +128,18 @@ impl Parser for ParserImpl {
             variables,
         };
 
-        self.parse_contents_recursive(&mut parse_results, uri, content, _follow, 0)?;
+        self.parse_contents_recursive(&mut parse_results, uri, content, follow, 0)?;
 
         Some(parse_results)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn parse_contents_recursive(
         &self,
         parse_results: &mut ParseResults,
         uri: &lsp_types::Url,
         content: &str,
-        _follow: bool,
+        follow: bool,
         iteration: i32,
     ) -> Option<()> {
         // #safety wow amazed
@@ -183,7 +183,7 @@ impl Parser for ParserImpl {
                             let mut remote_files: Vec<String> = vec![];
 
                             for (key, item_value) in item {
-                                if _follow && !remote_pkg.is_empty() {
+                                if follow && !remote_pkg.is_empty() {
                                     let remote_files = match self.git.fetch_remote_repository(
                                         remote_pkg.as_str(),
                                         remote_tag.as_str(),
@@ -209,12 +209,12 @@ impl Parser for ParserImpl {
                                                     std::fs::read_to_string(current_uri.path())
                                                         .ok()?;
 
-                                                if _follow {
+                                                if follow {
                                                     self.parse_contents_recursive(
                                                         parse_results,
                                                         &current_uri,
                                                         &current_content,
-                                                        _follow,
+                                                        follow,
                                                         iteration + 1,
                                                     );
                                                 }
@@ -222,7 +222,7 @@ impl Parser for ParserImpl {
                                         }
                                         "remote" => {
                                             if let Yaml::String(value) = item_value {
-                                                let url = match Url::parse(value) {
+                                                let remote_url = match Url::parse(value) {
                                                     Ok(f) => f,
                                                     Err(err) => {
                                                         error!("could not parse remote URL: {}; got err: {:?}", value, err);
@@ -230,11 +230,13 @@ impl Parser for ParserImpl {
                                                     }
                                                 };
 
-                                                let file = match self.git.fetch_remote(url.clone())
+                                                let file = match self
+                                                    .git
+                                                    .fetch_remote(remote_url.clone())
                                                 {
                                                     Ok(res) => res,
                                                     Err(err) => {
-                                                        error!("error retrieving remote file: {}; got err: {:?}", url, err);
+                                                        error!("error retrieving remote file: {}; got err: {:?}", remote_url, err);
                                                         continue;
                                                     }
                                                 };
@@ -256,8 +258,8 @@ impl Parser for ParserImpl {
                                             debug!("files: {:?}", item_value);
                                             if let Yaml::Array(value) = item_value {
                                                 for yml in value {
-                                                    if let Yaml::String(_path) = yml {
-                                                        remote_files.push(_path.to_string());
+                                                    if let Yaml::String(p) = yml {
+                                                        remote_files.push(p.to_string());
                                                     }
                                                 }
                                             }
@@ -267,7 +269,7 @@ impl Parser for ParserImpl {
                                 }
                             }
 
-                            if _follow && !remote_pkg.is_empty() {
+                            if follow && !remote_pkg.is_empty() {
                                 let remote_files = match self.git.fetch_remote_repository(
                                     remote_pkg.as_str(),
                                     remote_tag.as_str(),

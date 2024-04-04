@@ -3,9 +3,9 @@ use lsp_types::Position;
 use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 
-use crate::{
-    parser::PositionType, GitlabElement, Include, IncludeInformation, LSPPosition, NodeDefinition,
-    Range, RemoteInclude,
+use super::{
+    parser, GitlabElement, Include, IncludeInformation, LSPPosition, NodeDefinition, Range,
+    RemoteInclude,
 };
 
 // TODO: initialize tree only once
@@ -27,11 +27,13 @@ pub trait Treesitter {
         content: &str,
         needs_name: Option<&str>,
     ) -> Vec<GitlabElement>;
-    fn get_position_type(&self, content: &str, position: Position) -> PositionType;
+    fn get_position_type(&self, content: &str, position: Position) -> parser::PositionType;
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub struct TreesitterImpl {}
 
+#[allow(clippy::module_name_repetitions)]
 impl TreesitterImpl {
     pub fn new() -> Self {
         Self {}
@@ -58,22 +60,18 @@ impl Treesitter for TreesitterImpl {
                     )
                 )
             )
-            (#eq? @key "{}")
+            (#eq? @key "{node_key}")
         )
-        "#,
-            node_key
+        "#
         );
 
-        let tree = match parser.parse(content, None) {
-            Some(t) => t,
-            None => {
-                error!(
-                    "could not parse treesitter content; got content:\n{}",
-                    content
-                );
+        let Some(tree) = parser.parse(content, None) else {
+            error!(
+                "could not parse treesitter content; got content:\n{}",
+                content
+            );
 
-                return None;
-            }
+            return None;
         };
 
         let root_node = tree.root_node();
@@ -93,7 +91,7 @@ impl Treesitter for TreesitterImpl {
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -104,12 +102,12 @@ impl Treesitter for TreesitterImpl {
                         content: Some(text.to_string()),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).ok()?,
+                                character: u32::try_from(c.node.start_position().column).ok()?,
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).ok()?,
+                                character: u32::try_from(c.node.end_position().column).ok()?,
                             },
                         },
                     });
@@ -126,7 +124,7 @@ impl Treesitter for TreesitterImpl {
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        let query_source = r#"
+        let query_source = r"
         (
             stream(
                 document(
@@ -139,7 +137,7 @@ impl Treesitter for TreesitterImpl {
                 )
             )
         )
-        "#;
+        ";
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
@@ -150,7 +148,7 @@ impl Treesitter for TreesitterImpl {
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut root_nodes = vec![];
-        for m in matches.into_iter() {
+        for m in matches {
             let mut node = GitlabElement {
                 uri: uri.to_string(),
                 ..Default::default()
@@ -213,7 +211,7 @@ impl Treesitter for TreesitterImpl {
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut environments = vec![];
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -233,12 +231,13 @@ impl Treesitter for TreesitterImpl {
                         uri: uri.to_string(),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
                             },
                         },
                     });
@@ -273,7 +272,7 @@ impl Treesitter for TreesitterImpl {
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut stages = vec![];
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -293,12 +292,13 @@ impl Treesitter for TreesitterImpl {
                         uri: uri.to_string(),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
                             },
                         },
                     });
@@ -342,7 +342,7 @@ impl Treesitter for TreesitterImpl {
         let mut extends: Vec<GitlabElement> = vec![];
 
         let valid_indexes: Vec<u32> = vec![1, 2];
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if valid_indexes.contains(&c.index) {
                     let text = &content[c.node.byte_range()];
@@ -362,12 +362,13 @@ impl Treesitter for TreesitterImpl {
                         uri: uri.clone(),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
                             },
                         },
                     });
@@ -389,7 +390,7 @@ impl Treesitter for TreesitterImpl {
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        let mut search = "".to_string();
+        let mut search = String::new();
         if extend_name.is_some() {
             search = format!("(#eq? @value \"{}\")", extend_name.unwrap());
         }
@@ -404,10 +405,9 @@ impl Treesitter for TreesitterImpl {
                 (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @value)))))
             ]
             (#eq? @key "extends")
-            {}
+            {search}
         )
-        "#,
-            search
+        "#
         );
 
         let tree = parser.parse(content, None).unwrap();
@@ -419,7 +419,7 @@ impl Treesitter for TreesitterImpl {
 
         let mut extends: Vec<GitlabElement> = vec![];
 
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -439,12 +439,13 @@ impl Treesitter for TreesitterImpl {
                         uri: uri.clone(),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
                             },
                         },
                     });
@@ -455,7 +456,8 @@ impl Treesitter for TreesitterImpl {
         extends
     }
 
-    fn get_position_type(&self, content: &str, position: Position) -> PositionType {
+    #[allow(clippy::too_many_lines)]
+    fn get_position_type(&self, content: &str, position: Position) -> parser::PositionType {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -685,7 +687,7 @@ impl Treesitter for TreesitterImpl {
             ..Default::default()
         };
 
-        for mat in matches.into_iter() {
+        for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
             // reference,project,file
             // because the way treesitter captures those groups it doesn't really capture all
@@ -701,13 +703,10 @@ impl Treesitter for TreesitterImpl {
                 .any(|c| remote_include_indexes.contains(&c.index))
             {
                 for c in mat.captures {
-                    let bounding = match mat.captures.iter().find(|c| c.index == 17) {
-                        Some(b) => b,
-                        None => {
-                            error!("couldn't find index 17 even though its remote capture");
+                    let Some(bounding) = mat.captures.iter().find(|c| c.index == 17) else {
+                        error!("couldn't find index 17 even though its remote capture");
 
-                            return PositionType::None;
-                        }
+                        return parser::PositionType::None;
                     };
 
                     if bounding.node.start_position().row > position.line as usize
@@ -718,11 +717,11 @@ impl Treesitter for TreesitterImpl {
 
                     match c.index {
                         12 => {
-                            remote_include.project = Some(content[c.node.byte_range()].to_string())
+                            remote_include.project = Some(content[c.node.byte_range()].to_string());
                         }
                         14 => {
                             remote_include.reference =
-                                Some(content[c.node.byte_range()].to_string())
+                                Some(content[c.node.byte_range()].to_string());
                         }
                         16 => {
                             if c.node.start_position().row == position.line as usize {
@@ -735,7 +734,7 @@ impl Treesitter for TreesitterImpl {
                 }
 
                 if remote_include.is_valid() {
-                    return PositionType::Include(IncludeInformation {
+                    return parser::PositionType::Include(IncludeInformation {
                         remote: Some(remote_include),
                         ..Default::default()
                     });
@@ -746,12 +745,12 @@ impl Treesitter for TreesitterImpl {
                         && c.node.end_position().row >= position.line as usize
                     {
                         match c.index {
-                            1 => return PositionType::Extend,
-                            3 => return PositionType::Stage,
-                            5 => return PositionType::Variable,
-                            6 => return PositionType::RootNode,
+                            1 => return parser::PositionType::Extend,
+                            3 => return parser::PositionType::Stage,
+                            5 => return parser::PositionType::Variable,
+                            6 => return parser::PositionType::RootNode,
                             9 => {
-                                return PositionType::Include(IncludeInformation {
+                                return parser::PositionType::Include(IncludeInformation {
                                     local: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
@@ -759,12 +758,12 @@ impl Treesitter for TreesitterImpl {
                                 })
                             }
                             20 => {
-                                return PositionType::Needs(NodeDefinition {
+                                return parser::PositionType::Needs(NodeDefinition {
                                     name: content[c.node.byte_range()].to_string(),
                                 })
                             }
                             23 => {
-                                return PositionType::Include(IncludeInformation {
+                                return parser::PositionType::Include(IncludeInformation {
                                     remote_url: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
@@ -774,7 +773,7 @@ impl Treesitter for TreesitterImpl {
                             _ => {
                                 error!("invalid index: {}", c.index);
 
-                                PositionType::None
+                                parser::PositionType::None
                             }
                         };
                     }
@@ -782,7 +781,7 @@ impl Treesitter for TreesitterImpl {
             }
         }
 
-        PositionType::None
+        parser::PositionType::None
     }
 
     fn get_all_job_needs(
@@ -796,7 +795,7 @@ impl Treesitter for TreesitterImpl {
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        let mut search = "".to_string();
+        let mut search = String::new();
         if needs_name.is_some() {
             search = format!("(#eq? @needs_job_value \"{}\")", needs_name.unwrap());
         }
@@ -823,10 +822,9 @@ impl Treesitter for TreesitterImpl {
                 )
                 (#eq? @needs_key "needs")
                 (#eq? @needs_job_key "job")
-                {}
+                {search}
             )
-        "#,
-            search
+        "#
         );
 
         let tree = parser.parse(content, None).unwrap();
@@ -838,7 +836,7 @@ impl Treesitter for TreesitterImpl {
 
         let mut needs: Vec<GitlabElement> = vec![];
 
-        for mat in matches.into_iter() {
+        for mat in matches {
             for c in mat.captures {
                 if c.index == 2 {
                     let text = &content[c.node.byte_range()];
@@ -858,12 +856,13 @@ impl Treesitter for TreesitterImpl {
                         uri: uri.clone(),
                         range: Range {
                             start: LSPPosition {
-                                line: c.node.start_position().row as u32,
-                                character: c.node.start_position().column as u32,
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
                             },
                             end: LSPPosition {
-                                line: c.node.end_position().row as u32,
-                                character: c.node.end_position().column as u32,
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
                             },
                         },
                     });

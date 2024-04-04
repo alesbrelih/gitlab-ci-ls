@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use lsp_server::RequestId;
 use lsp_types::Diagnostic;
 
-mod git;
+pub mod git;
 pub mod handlers;
-mod parser;
-mod parser_utils;
-mod treesitter;
+pub mod parser;
+pub mod parser_utils;
+pub mod treesitter;
 
 #[derive(Debug, Default)]
 pub struct LSPPosition {
