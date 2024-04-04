@@ -24,7 +24,7 @@ pub trait Parser {
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
     fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement>;
-    fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
+    fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults>;
     fn parse_contents_recursive(
@@ -43,7 +43,7 @@ pub struct ParserImpl {
 }
 
 // TODO: rooot for the case of importing f9
-pub enum CompletionType {
+pub enum PositionType {
     Extend,
     Stage,
     Variable,
@@ -108,7 +108,7 @@ impl Parser for ParserImpl {
         self.treesitter.get_all_stages(uri, content)
     }
 
-    fn get_position_type(&self, content: &str, position: Position) -> CompletionType {
+    fn get_position_type(&self, content: &str, position: Position) -> PositionType {
         self.treesitter.get_position_type(content, position)
     }
 

@@ -212,7 +212,7 @@ impl LSPHandlers {
         let mut locations: Vec<LSPLocation> = vec![];
 
         match self.parser.get_position_type(document, position) {
-            parser::CompletionType::RootNode | parser::CompletionType::Extend => {
+            parser::PositionType::RootNode | parser::PositionType::Extend => {
                 let line = document.lines().nth(position.line as usize)?;
                 let word = ParserUtils::extract_word(line, position.character as usize)?
                     .trim_end_matches(':');
@@ -232,7 +232,7 @@ impl LSPHandlers {
                     }
                 }
             }
-            parser::CompletionType::Include(info) => {
+            parser::PositionType::Include(info) => {
                 if let Some(local) = info.local {
                     let local = ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
 
@@ -308,7 +308,7 @@ impl LSPHandlers {
                     }
                 }
             }
-            parser::CompletionType::Needs(node) => {
+            parser::PositionType::Needs(node) => {
                 for (uri, content) in store.iter() {
                     if let Some(element) = self.parser.get_root_node(
                         uri,
@@ -345,29 +345,13 @@ impl LSPHandlers {
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let mut items: Vec<LSPCompletion> = vec![];
-
-        let completion_type = self.parser.get_position_type(document, position);
-
-        match completion_type {
-            parser::CompletionType::Stage => {
-                let mut stages = self.on_completion_stages(line, position).ok()?;
-                items.append(&mut stages);
-            }
-            parser::CompletionType::Extend => {
-                let mut extends = self.on_completion_extends(line, position).ok()?;
-                items.append(&mut extends);
-            }
-            parser::CompletionType::Variable => {
-                let mut variables = self.on_completion_variables(line, position).ok()?;
-                items.append(&mut variables);
-            }
-            parser::CompletionType::Needs(_) => {
-                let mut needs = self.on_completion_needs(line, position).ok()?;
-                items.append(&mut needs);
-            }
+        let items = match self.parser.get_position_type(document, position) {
+            parser::PositionType::Stage => self.on_completion_stages(line, position).ok()?,
+            parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
+            parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
+            parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
             _ => return None,
-        }
+        };
 
         info!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
 
@@ -731,7 +715,7 @@ impl LSPHandlers {
         let mut references: Vec<GitlabElement> = vec![];
 
         match position_type {
-            parser::CompletionType::Extend => {
+            parser::PositionType::Extend => {
                 let word = ParserUtils::extract_word(line, position.character as usize)?;
 
                 for (uri, content) in store.iter() {
@@ -741,7 +725,7 @@ impl LSPHandlers {
                     references.append(&mut extends);
                 }
             }
-            parser::CompletionType::RootNode => {
+            parser::PositionType::RootNode => {
                 let word = ParserUtils::extract_word(line, position.character as usize)?
                     .trim_end_matches(':');
 

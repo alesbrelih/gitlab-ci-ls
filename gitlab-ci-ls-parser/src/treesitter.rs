@@ -4,8 +4,8 @@ use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 
 use crate::{
-    parser::CompletionType, GitlabElement, Include, IncludeInformation, LSPPosition,
-    NodeDefinition, Range, RemoteInclude,
+    parser::PositionType, GitlabElement, Include, IncludeInformation, LSPPosition, NodeDefinition,
+    Range, RemoteInclude,
 };
 
 // TODO: initialize tree only once
@@ -27,7 +27,7 @@ pub trait Treesitter {
         content: &str,
         needs_name: Option<&str>,
     ) -> Vec<GitlabElement>;
-    fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
+    fn get_position_type(&self, content: &str, position: Position) -> PositionType;
 }
 
 pub struct TreesitterImpl {}
@@ -455,7 +455,7 @@ impl Treesitter for TreesitterImpl {
         extends
     }
 
-    fn get_position_type(&self, content: &str, position: Position) -> CompletionType {
+    fn get_position_type(&self, content: &str, position: Position) -> PositionType {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -706,7 +706,7 @@ impl Treesitter for TreesitterImpl {
                         None => {
                             error!("couldn't find index 17 even though its remote capture");
 
-                            return CompletionType::None;
+                            return PositionType::None;
                         }
                     };
 
@@ -735,7 +735,7 @@ impl Treesitter for TreesitterImpl {
                 }
 
                 if remote_include.is_valid() {
-                    return CompletionType::Include(IncludeInformation {
+                    return PositionType::Include(IncludeInformation {
                         remote: Some(remote_include),
                         ..Default::default()
                     });
@@ -746,12 +746,12 @@ impl Treesitter for TreesitterImpl {
                         && c.node.end_position().row >= position.line as usize
                     {
                         match c.index {
-                            1 => return CompletionType::Extend,
-                            3 => return CompletionType::Stage,
-                            5 => return CompletionType::Variable,
-                            6 => return CompletionType::RootNode,
+                            1 => return PositionType::Extend,
+                            3 => return PositionType::Stage,
+                            5 => return PositionType::Variable,
+                            6 => return PositionType::RootNode,
                             9 => {
-                                return CompletionType::Include(IncludeInformation {
+                                return PositionType::Include(IncludeInformation {
                                     local: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
@@ -759,12 +759,12 @@ impl Treesitter for TreesitterImpl {
                                 })
                             }
                             20 => {
-                                return CompletionType::Needs(NodeDefinition {
+                                return PositionType::Needs(NodeDefinition {
                                     name: content[c.node.byte_range()].to_string(),
                                 })
                             }
                             23 => {
-                                return CompletionType::Include(IncludeInformation {
+                                return PositionType::Include(IncludeInformation {
                                     remote_url: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
@@ -774,7 +774,7 @@ impl Treesitter for TreesitterImpl {
                             _ => {
                                 error!("invalid index: {}", c.index);
 
-                                CompletionType::None
+                                PositionType::None
                             }
                         };
                     }
@@ -782,7 +782,7 @@ impl Treesitter for TreesitterImpl {
             }
         }
 
-        CompletionType::None
+        PositionType::None
     }
 
     fn get_all_job_needs(
