@@ -21,6 +21,8 @@ pub trait Treesitter {
         content: &str,
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
+    fn get_all_job_needs(&self, uri: String, content: &str, needs_name: &str)
+        -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
 }
 
@@ -738,5 +740,91 @@ impl Treesitter for TreesitterImpl {
         }
 
         CompletionType::None
+    }
+
+    fn get_all_job_needs(
+        &self,
+        uri: String,
+        content: &str,
+        needs_name: &str,
+    ) -> Vec<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let search = format!("(#eq? @needs_job_value \"{}\")", needs_name);
+
+        let query_source = format!(
+            r#"
+            (
+                block_mapping_pair
+                    key: (flow_node)@needs_key
+                    value: (
+                    block_node(
+                        block_sequence(
+                        block_sequence_item(
+                            block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                key: (flow_node)@needs_job_key
+                                value: (flow_node)@needs_job_value
+                            )
+                            )
+                        )
+                        )
+                    )
+                )
+                (#eq? @needs_key "needs")
+                (#eq? @needs_job_key "job")
+                {}
+            )
+        "#,
+            search
+        );
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), &query_source).unwrap();
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let mut needs: Vec<GitlabElement> = vec![];
+
+        for mat in matches.into_iter() {
+            for c in mat.captures {
+                if c.index == 2 {
+                    let text = &content[c.node.byte_range()];
+                    if c.node.start_position().row != c.node.end_position().row {
+                        // sanity check
+                        error!(
+                            "ALL: extends spans over multiple rows: uri: {} text: {}",
+                            uri, text
+                        );
+
+                        continue;
+                    }
+
+                    needs.push(GitlabElement {
+                        key: text.to_owned(),
+                        content: None,
+                        uri: uri.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: c.node.start_position().row as u32,
+                                character: c.node.start_position().column as u32,
+                            },
+                            end: LSPPosition {
+                                line: c.node.end_position().row as u32,
+                                character: c.node.end_position().column as u32,
+                            },
+                        },
+                    });
+                }
+            }
+        }
+
+        needs
     }
 }

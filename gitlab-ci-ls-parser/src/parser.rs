@@ -17,6 +17,7 @@ pub trait Parser {
         content: &str,
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
+    fn get_all_needs(&self, uri: String, content: &str, extend_name: &str) -> Vec<GitlabElement>;
     fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
@@ -262,5 +263,9 @@ impl Parser for ParserImpl {
         }
 
         Some(())
+    }
+
+    fn get_all_needs(&self, uri: String, content: &str, needs_name: &str) -> Vec<GitlabElement> {
+        self.treesitter.get_all_job_needs(uri, content, needs_name)
     }
 }

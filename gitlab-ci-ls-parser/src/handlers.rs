@@ -658,6 +658,13 @@ impl LSPHandlers {
                         );
                         references.append(&mut extends);
                     }
+                } else {
+                    for (uri, content) in store.iter() {
+                        let mut extends =
+                            self.parser
+                                .get_all_needs(uri.to_string(), content.as_str(), word);
+                        references.append(&mut extends);
+                    }
                 }
             }
             _ => {}
