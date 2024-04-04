@@ -1,11 +1,12 @@
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Instant};
 
+use anyhow::anyhow;
 use log::{debug, error, info};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams, HoverParams,
-    Url,
+    Position, Url,
 };
 
 use crate::{
@@ -350,134 +351,20 @@ impl LSPHandlers {
 
         match completion_type {
             parser::CompletionType::Stage => {
-                let stages = self.stages.lock().unwrap();
-                let word = ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c: char| c.is_whitespace(),
-                );
-                let after = ParserUtils::word_after_cursor(line, position.character as usize);
-
-                for (stage, _) in stages.iter() {
-                    if stage.contains(word) {
-                        items.push(LSPCompletion {
-                            label: stage.clone(),
-                            details: None,
-                            location: LSPLocation {
-                                range: crate::Range {
-                                    start: crate::LSPPosition {
-                                        line: position.line,
-                                        character: position.character - word.len() as u32,
-                                    },
-                                    end: crate::LSPPosition {
-                                        line: position.line,
-                                        character: position.character + after.len() as u32,
-                                    },
-                                },
-                                ..Default::default()
-                            },
-                        })
-                    }
-                }
+                let mut stages = self.on_completion_stages(line, position).ok()?;
+                items.append(&mut stages);
             }
             parser::CompletionType::Extend => {
-                let nodes = self.nodes.lock().unwrap();
-                let word = ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c: char| c.is_whitespace(),
-                );
-
-                let after = ParserUtils::word_after_cursor(line, position.character as usize);
-
-                for (_, node) in nodes.iter() {
-                    for (node_key, node_description) in node.iter() {
-                        if node_key.starts_with('.') && node_key.contains(word) {
-                            items.push(LSPCompletion {
-                                label: node_key.clone(),
-                                details: Some(node_description.clone()),
-                                location: LSPLocation {
-                                    range: crate::Range {
-                                        start: crate::LSPPosition {
-                                            line: position.line,
-                                            character: position.character - word.len() as u32,
-                                        },
-                                        end: crate::LSPPosition {
-                                            line: position.line,
-                                            character: position.character + after.len() as u32,
-                                        },
-                                    },
-                                    ..Default::default()
-                                },
-                            })
-                        }
-                    }
-                }
+                let mut extends = self.on_completion_extends(line, position).ok()?;
+                items.append(&mut extends);
             }
             parser::CompletionType::Variable => {
-                let variables = self.variables.lock().unwrap();
-                let word = ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c: char| c == '$',
-                );
-
-                let after = ParserUtils::word_after_cursor(line, position.character as usize);
-
-                for (variable, _) in variables.iter() {
-                    if variable.starts_with(word) {
-                        items.push(LSPCompletion {
-                            label: variable.clone(),
-                            details: None,
-                            location: LSPLocation {
-                                range: crate::Range {
-                                    start: crate::LSPPosition {
-                                        line: position.line,
-                                        character: position.character - word.len() as u32,
-                                    },
-                                    end: crate::LSPPosition {
-                                        line: position.line,
-                                        character: position.character + after.len() as u32,
-                                    },
-                                },
-                                ..Default::default()
-                            },
-                        })
-                    }
-                }
+                let mut variables = self.on_completion_variables(line, position).ok()?;
+                items.append(&mut variables);
             }
             parser::CompletionType::Needs(_) => {
-                let nodes = self.nodes.lock().unwrap();
-                let word = ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c: char| c.is_whitespace(),
-                );
-                let after = ParserUtils::word_after_cursor(line, position.character as usize);
-
-                for (_, node) in nodes.iter() {
-                    for (node_key, node_description) in node.iter() {
-                        if !node_key.starts_with('.') && node_key.contains(word) {
-                            items.push(LSPCompletion {
-                                label: node_key.clone(),
-                                details: Some(node_description.clone()),
-                                location: LSPLocation {
-                                    range: crate::Range {
-                                        start: crate::LSPPosition {
-                                            line: position.line,
-                                            character: position.character - word.len() as u32,
-                                        },
-                                        end: crate::LSPPosition {
-                                            line: position.line,
-                                            character: position.character + after.len() as u32,
-                                        },
-                                    },
-                                    ..Default::default()
-                                },
-                            })
-                        }
-                    }
-                }
+                let mut needs = self.on_completion_needs(line, position).ok()?;
+                items.append(&mut needs);
             }
             _ => return None,
         }
@@ -488,6 +375,167 @@ impl LSPHandlers {
             id: request.id,
             list: items,
         }))
+    }
+
+    fn on_completion_stages(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let stages = self
+            .stages
+            .lock()
+            .map_err(|e| anyhow::anyhow!("failed to lock stages: {}", e))?;
+
+        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
+            c.is_whitespace()
+        });
+        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
+        let items = stages
+            .keys()
+            .filter(|stage| stage.contains(word))
+            .map(|stage| LSPCompletion {
+                label: stage.clone(),
+                details: None,
+                location: LSPLocation {
+                    range: crate::Range {
+                        start: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character - word.len() as u32,
+                        },
+                        end: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character + after.len() as u32,
+                        },
+                    },
+                    ..Default::default()
+                },
+            })
+            .collect();
+
+        Ok(items)
+    }
+    fn on_completion_extends(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let nodes = self
+            .nodes
+            .lock()
+            .map_err(|e| anyhow!("failed to lock nodes: {}", e))?;
+
+        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
+            c.is_whitespace()
+        });
+
+        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
+        let items = nodes
+            .values()
+            .flat_map(|n| n.iter())
+            .filter(|(node_key, _)| node_key.starts_with('.') && node_key.contains(word))
+            .map(|(node_key, node_description)| LSPCompletion {
+                label: node_key.to_string(),
+                details: Some(node_description.to_string()),
+                location: LSPLocation {
+                    range: crate::Range {
+                        start: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character.saturating_sub(word.len() as u32),
+                        },
+                        end: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character + after.len() as u32,
+                        },
+                    },
+                    ..Default::default()
+                },
+            })
+            .collect();
+
+        Ok(items)
+    }
+
+    fn on_completion_variables(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let variables = self
+            .variables
+            .lock()
+            .map_err(|e| anyhow!("failed to lock variables: {}", e))?;
+
+        let word =
+            ParserUtils::word_before_cursor(line, position.character as usize, |c: char| c == '$');
+
+        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
+        let items = variables
+            .keys()
+            .filter(|v| v.starts_with(word))
+            .map(|v| LSPCompletion {
+                label: v.clone(),
+                details: None,
+                location: LSPLocation {
+                    range: crate::Range {
+                        start: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character - word.len() as u32,
+                        },
+                        end: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character + after.len() as u32,
+                        },
+                    },
+                    ..Default::default()
+                },
+            })
+            .collect();
+
+        Ok(items)
+    }
+
+    fn on_completion_needs(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let nodes = self
+            .nodes
+            .lock()
+            .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
+        let word = ParserUtils::word_before_cursor(line, position.character as usize, |c: char| {
+            c.is_whitespace()
+        });
+        let after = ParserUtils::word_after_cursor(line, position.character as usize);
+
+        let items = nodes
+            .values()
+            .flat_map(|needs| needs.iter())
+            .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
+            .map(|(node_key, node_description)| LSPCompletion {
+                label: node_key.clone(),
+                details: Some(node_description.clone()),
+                location: LSPLocation {
+                    range: crate::Range {
+                        start: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character - word.len() as u32,
+                        },
+                        end: crate::LSPPosition {
+                            line: position.line,
+                            character: position.character + after.len() as u32,
+                        },
+                    },
+                    ..Default::default()
+                },
+            })
+            .collect();
+
+        Ok(items)
     }
 
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
