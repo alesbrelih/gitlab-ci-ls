@@ -19,5 +19,9 @@ jobs:
           persist-credentials: false
       - name: Semantic Release
         uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            semantic-release-cargo
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
