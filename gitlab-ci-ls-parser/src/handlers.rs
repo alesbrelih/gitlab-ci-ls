@@ -255,6 +255,31 @@ impl LSPHandlers {
                         }
                     }
                 }
+                if let Some(remote_url) = info.remote_url {
+                    let path_hash = ParserUtils::remote_path_to_hash(ParserUtils::strip_quotes(
+                        remote_url.path.as_str(),
+                    ));
+
+                    for (uri, _) in store.iter() {
+                        if uri.contains(format!("_{}.yaml", path_hash).as_str()) {
+                            locations.push(LSPLocation {
+                                uri: uri.clone(),
+                                range: Range {
+                                    start: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                    end: LSPPosition {
+                                        line: 0,
+                                        character: 0,
+                                    },
+                                },
+                            });
+
+                            break;
+                        }
+                    }
+                }
                 if let Some(remote) = info.remote {
                     let file = remote.file?;
                     let file = ParserUtils::strip_quotes(&file).trim_start_matches('/');

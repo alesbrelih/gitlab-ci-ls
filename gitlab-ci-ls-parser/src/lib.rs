@@ -104,7 +104,7 @@ pub struct LSPConfig {
 }
 
 #[derive(Debug)]
-pub struct LocalInclude {
+pub struct Include {
     pub path: String,
 }
 #[derive(Debug, Default)]
@@ -120,10 +120,11 @@ impl RemoteInclude {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct IncludeInformation {
     pub remote: Option<RemoteInclude>,
-    pub local: Option<LocalInclude>,
+    pub remote_url: Option<Include>,
+    pub local: Option<Include>,
 }
 
 #[derive(Debug)]

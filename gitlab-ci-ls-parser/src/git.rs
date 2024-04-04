@@ -1,18 +1,26 @@
-use std::{collections::HashMap, fs, path, process::Command};
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::Write,
+    path,
+    process::Command,
+    time::Duration,
+};
 
 use log::{debug, error, info};
-use lsp_types::Url;
+use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
 
-use crate::GitlabFile;
+use crate::{parser_utils::ParserUtils, GitlabFile};
 
 pub trait Git {
     fn clone_repo(&self, repo_dest: &str, remote_tag: &str, remote_pkg: &str);
-    fn fetch_remote_files(
+    fn fetch_remote_repository(
         &self,
         remote_pkg: &str,
         remote_tag: &str,
         remote_files: &[String],
     ) -> anyhow::Result<Vec<GitlabFile>>;
+    fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
 }
 
 pub struct GitImpl {
@@ -96,7 +104,7 @@ impl Git for GitImpl {
         }
     }
 
-    fn fetch_remote_files(
+    fn fetch_remote_repository(
         &self,
         remote_pkg: &str,
         remote_tag: &str,
@@ -143,5 +151,83 @@ impl Git for GitImpl {
         }
 
         Ok(files)
+    }
+
+    fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile> {
+        let remote_cache_path = format!("{}remotes", &self.cache_path);
+        std::fs::create_dir_all(&remote_cache_path)?;
+
+        // check if file was changed
+        let file_hash = ParserUtils::remote_path_to_hash(url.as_str());
+        let file_name_pattern = format!("_{}.yaml", file_hash);
+
+        let dir_entry = fs::read_dir(&remote_cache_path)?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(&file_name_pattern)
+            });
+
+        let (existing_name_full, file_path) = dir_entry
+            .map(|entry| {
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    entry.path(),
+                )
+            })
+            .unzip();
+
+        // Extracting etag from the filename
+        let existing_etag = existing_name_full
+            .as_ref()
+            .and_then(|name| name.split('_').next())
+            .map(String::from);
+
+        let client = Client::builder().timeout(Duration::from_secs(4)).build()?;
+
+        let mut req = client.get(url);
+        if let Some(etag) = &existing_etag {
+            req = req.header(IF_NONE_MATCH, format!("\"{}\"", etag));
+        }
+
+        let res = req.send()?;
+
+        match res.status() {
+            StatusCode::NOT_MODIFIED => {
+                let fpath = file_path.expect("File path must exist for NOT_MODIFIED response");
+                let content = fs::read_to_string(&fpath)?;
+
+                info!("CACHED");
+
+                Ok(GitlabFile {
+                    path: format!("file://{}", fpath.to_str().unwrap()),
+                    content,
+                })
+            }
+            _ => {
+                info!("NOT CACHED");
+
+                let headers = res.headers().clone();
+                let etag = headers.get("etag").unwrap().to_str()?;
+                let text = res.text()?;
+
+                let path = format!(
+                    "{}/{}_{}.yaml",
+                    remote_cache_path,
+                    ParserUtils::strip_quotes(etag),
+                    file_hash
+                );
+
+                let mut file = File::create(&path)?;
+                file.write_all(text.as_bytes())?;
+
+                Ok(GitlabFile {
+                    path,
+                    content: text,
+                })
+            }
+        }
     }
 }

@@ -4,7 +4,7 @@ use tree_sitter::{Query, QueryCursor};
 use tree_sitter_yaml::language;
 
 use crate::{
-    parser::CompletionType, GitlabElement, IncludeInformation, LSPPosition, LocalInclude,
+    parser::CompletionType, GitlabElement, Include, IncludeInformation, LSPPosition,
     NodeDefinition, Range, RemoteInclude,
 };
 
@@ -644,6 +644,35 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @needs_key "needs")
                 (#eq? @needs_job_key "job")
             )
+            (
+                stream(
+                    document(
+                        block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@remote_url_include_key))
+                                    value: (
+                                        block_node(
+                                            block_sequence(
+                                                block_sequence_item(
+                                                    block_node(
+                                                        block_mapping(
+                                                            block_mapping_pair
+                                                                key: (flow_node(plain_scalar(string_scalar)@remote_url_key))
+                                                                value: (flow_node)@remote_url_value
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                (#eq? @remote_url_include_key "include")
+                (#eq? @remote_url_key "remote")
+            )
         "#;
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
@@ -663,6 +692,8 @@ impl Treesitter for TreesitterImpl {
             // together but there are multiple capture groups I need to iterate over
             // TODO: check treesitter if I can group to make this easier.. Perhaps some capture
             // group is wrong.
+            error!("CAPTURES: {:?}", mat.captures);
+            error!("position: {:?}", position.line);
             let remote_include_indexes: Vec<u32> = vec![10, 11, 12, 13, 14, 15, 16, 17];
             if mat
                 .captures
@@ -705,8 +736,8 @@ impl Treesitter for TreesitterImpl {
 
                 if remote_include.is_valid() {
                     return CompletionType::Include(IncludeInformation {
-                        local: None,
                         remote: Some(remote_include),
+                        ..Default::default()
                     });
                 }
             } else {
@@ -721,15 +752,23 @@ impl Treesitter for TreesitterImpl {
                             6 => return CompletionType::RootNode,
                             9 => {
                                 return CompletionType::Include(IncludeInformation {
-                                    local: Some(LocalInclude {
+                                    local: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
-                                    remote: None,
+                                    ..Default::default()
                                 })
                             }
                             20 => {
                                 return CompletionType::Needs(NodeDefinition {
                                     name: content[c.node.byte_range()].to_string(),
+                                })
+                            }
+                            23 => {
+                                return CompletionType::Include(IncludeInformation {
+                                    remote_url: Some(Include {
+                                        path: content[c.node.byte_range()].to_string(),
+                                    }),
+                                    ..Default::default()
                                 })
                             }
                             _ => {

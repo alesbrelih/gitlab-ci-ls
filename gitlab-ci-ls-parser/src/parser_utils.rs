@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 pub struct ParserUtils {}
 
 impl ParserUtils {
@@ -54,5 +56,11 @@ impl ParserUtils {
             .map_or(line.len(), |(idx, _)| start + idx);
 
         &line[start..end]
+    }
+
+    pub fn remote_path_to_hash(uri: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        uri.hash(&mut hasher);
+        hasher.finish().to_string()
     }
 }

@@ -184,7 +184,7 @@ impl Parser for ParserImpl {
 
                             for (key, item_value) in item {
                                 if _follow && !remote_pkg.is_empty() {
-                                    let remote_files = match self.git.fetch_remote_files(
+                                    let remote_files = match self.git.fetch_remote_repository(
                                         remote_pkg.as_str(),
                                         remote_tag.as_str(),
                                         &remote_files,
@@ -220,6 +220,28 @@ impl Parser for ParserImpl {
                                                 }
                                             }
                                         }
+                                        "remote" => {
+                                            if let Yaml::String(value) = item_value {
+                                                let url = match Url::parse(value) {
+                                                    Ok(f) => f,
+                                                    Err(err) => {
+                                                        error!("could not parse remote URL: {}; got err: {:?}", value, err);
+                                                        continue;
+                                                    }
+                                                };
+
+                                                let file = match self.git.fetch_remote(url.clone())
+                                                {
+                                                    Ok(res) => res,
+                                                    Err(err) => {
+                                                        error!("error retrieving remote file: {}; got err: {:?}", url, err);
+                                                        continue;
+                                                    }
+                                                };
+
+                                                self.parse_remote_files(parse_results, &[file]);
+                                            }
+                                        }
                                         "project" => {
                                             if let Yaml::String(value) = item_value {
                                                 remote_pkg = value.clone();
@@ -246,7 +268,7 @@ impl Parser for ParserImpl {
                             }
 
                             if _follow && !remote_pkg.is_empty() {
-                                let remote_files = match self.git.fetch_remote_files(
+                                let remote_files = match self.git.fetch_remote_repository(
                                     remote_pkg.as_str(),
                                     remote_tag.as_str(),
                                     &remote_files,
