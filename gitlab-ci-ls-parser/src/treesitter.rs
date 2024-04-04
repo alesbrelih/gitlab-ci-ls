@@ -21,8 +21,12 @@ pub trait Treesitter {
         content: &str,
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
-    fn get_all_job_needs(&self, uri: String, content: &str, needs_name: &str)
-        -> Vec<GitlabElement>;
+    fn get_all_job_needs(
+        &self,
+        uri: String,
+        content: &str,
+        needs_name: Option<&str>,
+    ) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> CompletionType;
 }
 
@@ -746,14 +750,17 @@ impl Treesitter for TreesitterImpl {
         &self,
         uri: String,
         content: &str,
-        needs_name: &str,
+        needs_name: Option<&str>,
     ) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        let search = format!("(#eq? @needs_job_value \"{}\")", needs_name);
+        let mut search = "".to_string();
+        if needs_name.is_some() {
+            search = format!("(#eq? @needs_job_value \"{}\")", needs_name.unwrap());
+        }
 
         let query_source = format!(
             r#"

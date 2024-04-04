@@ -430,12 +430,9 @@ impl LSPHandlers {
                 );
                 let after = ParserUtils::word_after_cursor(line, position.character as usize);
 
-                error!("word: {}", word);
-
                 for (_, node) in nodes.iter() {
                     for (node_key, node_description) in node.iter() {
                         if !node_key.starts_with('.') && node_key.contains(word) {
-                            error!("FOUND: {}", node_key);
                             items.push(LSPCompletion {
                                 label: node_key.clone(),
                                 details: Some(node_description.clone()),
@@ -611,6 +608,33 @@ impl LSPHandlers {
             }
         }
 
+        let needs = self.parser.get_all_job_needs(
+            params.text_document.uri.to_string(),
+            content.as_str(),
+            None,
+        );
+
+        'needs: for need in needs {
+            for (_, node) in all_nodes.iter() {
+                if node.get(need.key.as_str()).is_some() {
+                    continue 'needs;
+                }
+            }
+            diagnostics.push(Diagnostic::new_simple(
+                lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: need.range.start.line,
+                        character: need.range.start.character,
+                    },
+                    end: lsp_types::Position {
+                        line: need.range.end.line,
+                        character: need.range.end.character,
+                    },
+                },
+                format!("Job: {} does not exist.", need.key),
+            ));
+        }
+
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(crate::DiagnosticsResult {
             id: request.id,
@@ -660,9 +684,11 @@ impl LSPHandlers {
                     }
                 } else {
                     for (uri, content) in store.iter() {
-                        let mut extends =
-                            self.parser
-                                .get_all_needs(uri.to_string(), content.as_str(), word);
+                        let mut extends = self.parser.get_all_job_needs(
+                            uri.to_string(),
+                            content.as_str(),
+                            Some(word),
+                        );
                         references.append(&mut extends);
                     }
                 }
