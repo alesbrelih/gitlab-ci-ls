@@ -13,8 +13,8 @@ use crate::{
     parser::{self, Parser},
     parser_utils::ParserUtils,
     treesitter::TreesitterImpl,
-    DefinitionResult, GitlabElement, HoverResult, LSPCompletion, LSPConfig, LSPLocation,
-    LSPPosition, LSPResult, Range, ReferencesResult,
+    DefinitionResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
+    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
 };
 
 pub struct LSPHandlers {
@@ -205,6 +205,7 @@ impl LSPHandlers {
         let params = serde_json::from_value::<GotoTypeDefinitionParams>(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
+        let store = &*store;
         let document_uri = params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&document_uri.clone().into())?;
         let position = params.text_document_position_params.position;
@@ -233,79 +234,8 @@ impl LSPHandlers {
                 }
             }
             parser::PositionType::Include(info) => {
-                if let Some(local) = info.local {
-                    let local = ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
-
-                    for (uri, _) in store.iter() {
-                        if uri.ends_with(local) {
-                            locations.push(LSPLocation {
-                                uri: uri.clone(),
-                                range: Range {
-                                    start: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                    end: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                },
-                            });
-
-                            break;
-                        }
-                    }
-                }
-                if let Some(remote_url) = info.remote_url {
-                    let path_hash = ParserUtils::remote_path_to_hash(ParserUtils::strip_quotes(
-                        remote_url.path.as_str(),
-                    ));
-
-                    for (uri, _) in store.iter() {
-                        if uri.contains(format!("_{}.yaml", path_hash).as_str()) {
-                            locations.push(LSPLocation {
-                                uri: uri.clone(),
-                                range: Range {
-                                    start: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                    end: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                },
-                            });
-
-                            break;
-                        }
-                    }
-                }
-                if let Some(remote) = info.remote {
-                    let file = remote.file?;
-                    let file = ParserUtils::strip_quotes(&file).trim_start_matches('/');
-
-                    let path = format!("{}/{}/{}", remote.project?, remote.reference?, file);
-
-                    for (uri, _) in store.iter() {
-                        if uri.ends_with(path.as_str()) {
-                            locations.push(LSPLocation {
-                                uri: uri.clone(),
-                                range: Range {
-                                    start: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                    end: LSPPosition {
-                                        line: 0,
-                                        character: 0,
-                                    },
-                                },
-                            });
-
-                            break;
-                        }
-                    }
+                if let Some(include) = self.on_definition_include(info, store) {
+                    locations.push(include);
                 }
             }
             parser::PositionType::Needs(node) => {
@@ -332,6 +262,93 @@ impl LSPHandlers {
             id: request.id,
             locations,
         }))
+    }
+
+    fn on_definition_include(
+        &self,
+        info: IncludeInformation,
+        store: &HashMap<String, String>,
+    ) -> Option<LSPLocation> {
+        match info {
+            IncludeInformation {
+                local: Some(local),
+                remote: None,
+                remote_url: None,
+            } => {
+                let local = ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
+
+                store
+                    .keys()
+                    .find(|uri| uri.ends_with(local))
+                    .map(|uri| LSPLocation {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                    })
+            }
+            IncludeInformation {
+                local: None,
+                remote: Some(remote),
+                remote_url: None,
+            } => {
+                let file = remote.file?;
+                let file = ParserUtils::strip_quotes(&file).trim_start_matches('/');
+
+                let path = format!("{}/{}/{}", remote.project?, remote.reference?, file);
+
+                store
+                    .keys()
+                    .find(|uri| uri.ends_with(&path))
+                    .map(|uri| LSPLocation {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                    })
+            }
+            IncludeInformation {
+                local: None,
+                remote: None,
+                remote_url: Some(remote_url),
+            } => {
+                let path_hash = ParserUtils::remote_path_to_hash(ParserUtils::strip_quotes(
+                    remote_url.path.as_str(),
+                ));
+
+                store
+                    .keys()
+                    .find(|uri| uri.ends_with(format!("_{}.yaml", path_hash).as_str()))
+                    .map(|uri| LSPLocation {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                    })
+            }
+            _ => None,
+        }
     }
 
     pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
