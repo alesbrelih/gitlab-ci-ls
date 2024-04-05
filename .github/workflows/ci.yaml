@@ -1,5 +1,4 @@
 ---
-
 name: CI
 
 on:
@@ -19,3 +18,12 @@ jobs:
 
       - name: Lint the code
         run: cargo clippy --all-targets --all-features
+  test:
+    name: Lint the code.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: cargo test
