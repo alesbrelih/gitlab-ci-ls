@@ -33,6 +33,13 @@ pub trait Parser {
         _follow: bool,
         iteration: i32,
     ) -> Option<()>;
+    fn get_variable_definitions(
+        &self,
+        word: &str,
+        uri: &str,
+        position: Position,
+        store: &HashMap<String, String>,
+    ) -> Option<Vec<GitlabElement>>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -62,6 +69,45 @@ impl ParserImpl {
         ParserImpl {
             treesitter,
             git: Box::new(git::GitImpl::new(remote_urls, package_map, cache_path)),
+        }
+    }
+
+    fn all_nodes(
+        &self,
+        store: &HashMap<String, String>,
+        all_nodes: &mut Vec<GitlabElement>,
+        node: GitlabElement,
+        iter: usize,
+    ) {
+        // Another safety wow
+        if iter > 5 {
+            return;
+        }
+
+        all_nodes.push(node.clone());
+
+        let extends =
+            self.get_all_extends(node.uri, node.content.unwrap_or_default().as_str(), None);
+
+        if extends.is_empty() {
+            return;
+        }
+
+        for extend in extends {
+            for (uri, content) in store {
+                if let Some(root_node) = self.get_root_node(uri, content, extend.key.as_str()) {
+                    let node = GitlabElement {
+                        uri: root_node.uri,
+                        key: root_node.key,
+                        content: Some(root_node.content.unwrap()),
+                        ..Default::default()
+                    };
+
+                    self.all_nodes(store, all_nodes, node, iter + 1);
+
+                    break;
+                }
+            }
         }
     }
 
@@ -301,5 +347,34 @@ impl Parser for ParserImpl {
         needs_name: Option<&str>,
     ) -> Vec<GitlabElement> {
         self.treesitter.get_all_job_needs(uri, content, needs_name)
+    }
+
+    fn get_variable_definitions(
+        &self,
+        variable: &str,
+        uri: &str,
+        position: Position,
+        store: &HashMap<String, String>,
+    ) -> Option<Vec<GitlabElement>> {
+        let mut all_nodes = vec![];
+
+        if let Some(content) = store.get(uri) {
+            let element = self
+                .treesitter
+                .get_root_node_at_position(content, position)?;
+
+            self.all_nodes(store, &mut all_nodes, element, 0);
+        }
+
+        Some(
+            all_nodes
+                .iter()
+                .filter_map(|e| {
+                    let cnt = store.get(&e.uri)?;
+                    self.treesitter
+                        .job_variable_definition(e.uri.as_str(), cnt, variable, &e.key)
+                })
+                .collect(),
+        )
     }
 }

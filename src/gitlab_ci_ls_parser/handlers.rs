@@ -249,6 +249,38 @@ impl LSPHandlers {
                     }
                 }
             }
+            parser::PositionType::Variable => {
+                let line = document.lines().nth(position.line as usize)?;
+                let word =
+                    parser_utils::ParserUtils::extract_variable(line, position.character as usize)?;
+
+                let variable_locations = self.parser.get_variable_definitions(
+                    word,
+                    document_uri.as_str(),
+                    position,
+                    store,
+                )?;
+
+                for location in variable_locations {
+                    locations.push(LSPLocation {
+                        uri: location.uri,
+                        range: location.range,
+                    });
+                }
+                let mut root = self
+                    .variables
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(name, _)| name.starts_with(word))
+                    .map(|(_, el)| LSPLocation {
+                        uri: el.uri.clone(),
+                        range: el.range.clone(),
+                    })
+                    .collect::<Vec<LSPLocation>>();
+
+                locations.append(&mut root);
+            }
             _ => {
                 error!("invalid position type for goto def");
                 return None;

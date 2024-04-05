@@ -63,4 +63,20 @@ impl ParserUtils {
         uri.hash(&mut hasher);
         hasher.finish().to_string()
     }
+
+    pub fn extract_variable(line: &str, char_index: usize) -> Option<&str> {
+        if char_index >= line.len() {
+            return None;
+        }
+
+        let start = line[..char_index]
+            .rfind(|c: char| c == '$' || c == '{')
+            .map_or(0, |index| index + 1);
+
+        let end = line[char_index..]
+            .find(|c: char| !c.is_alphabetic() && c != '_')
+            .map_or(line.len(), |index| index + char_index);
+
+        Some(&line[start..end])
+    }
 }

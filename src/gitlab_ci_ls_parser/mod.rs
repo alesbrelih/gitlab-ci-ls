@@ -9,13 +9,13 @@ pub mod parser;
 pub mod parser_utils;
 pub mod treesitter;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LSPPosition {
     pub line: u32,
     pub character: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Range {
     pub start: LSPPosition,
     pub end: LSPPosition,
@@ -79,7 +79,7 @@ pub struct GitlabFile {
     pub content: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GitlabElement {
     pub key: String,
     pub content: Option<String>,

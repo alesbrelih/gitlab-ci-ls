@@ -28,6 +28,15 @@ pub trait Treesitter {
         needs_name: Option<&str>,
     ) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> parser::PositionType;
+    fn get_root_node_at_position(&self, content: &str, position: Position)
+        -> Option<GitlabElement>;
+    fn job_variable_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        variable_name: &str,
+        job_name: &str,
+    ) -> Option<GitlabElement>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -694,8 +703,6 @@ impl Treesitter for TreesitterImpl {
             // together but there are multiple capture groups I need to iterate over
             // TODO: check treesitter if I can group to make this easier.. Perhaps some capture
             // group is wrong.
-            error!("CAPTURES: {:?}", mat.captures);
-            error!("position: {:?}", position.line);
             let remote_include_indexes: Vec<u32> = vec![10, 11, 12, 13, 14, 15, 16, 17];
             if mat
                 .captures
@@ -871,5 +878,144 @@ impl Treesitter for TreesitterImpl {
         }
 
         needs
+    }
+
+    fn get_root_node_at_position(
+        &self,
+        content: &str,
+        position: Position,
+    ) -> Option<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let query_source = r"
+        (
+            stream(
+                document(
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@key))
+                        )@full
+                    )
+                )
+            )
+        )
+        ";
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), query_source).unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        matches
+            .into_iter()
+            .flat_map(|m| m.captures.iter())
+            .find(|c| {
+                c.index == 1
+                    && c.node.start_position().row <= position.line as usize
+                    && c.node.end_position().row >= position.line as usize
+            })
+            .map(|c| {
+                let text = content[c.node.byte_range()].to_string();
+                let key = text.lines().collect::<Vec<&str>>()[0]
+                    .trim_end_matches(':')
+                    .to_string();
+
+                GitlabElement {
+                    key,
+                    content: Some(text),
+                    ..Default::default()
+                }
+            })
+    }
+
+    fn job_variable_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        variable_name: &str,
+        job_name: &str,
+    ) -> Option<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let query_source = format!(
+            r#"
+        (
+            stream(
+                document(
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@key))
+                                value: (
+                                    block_node(
+                                        block_mapping(
+                                            block_mapping_pair
+                                                key: (flow_node(plain_scalar(string_scalar)@property_key))
+                                                value: (
+                                                    block_node(
+                                                        block_mapping(
+                                                            block_mapping_pair
+                                                            key: (flow_node(plain_scalar(string_scalar)@variable_key))
+                                                        )
+                                                    )
+                                                )
+                                            (#eq? @property_key "variables")
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            (#eq? @key "{job_name}")
+            (#eq? @variable_key "{variable_name}")
+        )
+        "#
+        );
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(language(), &query_source).unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        matches
+            .into_iter()
+            .flat_map(|m| m.captures.iter())
+            .find(|c| c.index == 2)
+            .map(|c| {
+                let text = content[c.node.byte_range()].to_string();
+                let key = text.lines().collect::<Vec<&str>>()[0]
+                    .trim_end_matches(':')
+                    .to_string();
+
+                GitlabElement {
+                    uri: uri.to_string(),
+                    key,
+                    content: Some(text),
+                    range: Range {
+                        start: LSPPosition {
+                            line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                            character: u32::try_from(c.node.start_position().column).unwrap_or(0),
+                        },
+                        end: LSPPosition {
+                            line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                            character: u32::try_from(c.node.end_position().column).unwrap_or(0),
+                        },
+                    },
+                }
+            })
     }
 }
