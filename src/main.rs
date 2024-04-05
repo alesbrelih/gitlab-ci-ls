@@ -13,6 +13,8 @@ use lsp_types::{
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
+use std::path::Path;
 use std::process::exit;
 
 mod gitlab_ci_ls_parser;
@@ -24,6 +26,9 @@ struct InitializationOptions {
 
     #[serde(default = "default_log_path")]
     log_path: String,
+
+    #[serde(rename = "cache", default = "default_cache_path")]
+    cache_path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +46,13 @@ fn default_package_map() -> HashMap<String, String> {
 
 fn default_log_path() -> String {
     "/dev/null".to_string()
+}
+
+fn default_cache_path() -> String {
+    format!(
+        "{}/.gitlab-ci-ls/cache/",
+        std::env::var("HOME").unwrap_or_default()
+    )
 }
 
 // TODO: refactor and remove the next line :)
@@ -105,12 +117,18 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             InitializationParams {
                 root_path: String::new(),
                 initialization_options: InitializationOptions {
-                    log_path: String::from("/dev/null"),
+                    log_path: default_log_path(),
                     package_map: HashMap::new(),
+                    cache_path: default_cache_path(),
                 },
             }
         }
     };
+
+    let path = Path::new(&init_params.initialization_options.log_path);
+    if let Some(dir_path) = path.parent() {
+        fs::create_dir_all(dir_path)?;
+    }
 
     simple_logging::log_to_file(
         &init_params.initialization_options.log_path,
@@ -131,7 +149,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     let lsp_events =
         gitlab_ci_ls_parser::handlers::LSPHandlers::new(gitlab_ci_ls_parser::LSPConfig {
-            cache_path: format!("{}/.gitlab-ci-ls/cache/", std::env::var("HOME")?),
+            cache_path: init_params.initialization_options.cache_path,
             package_map: init_params.initialization_options.package_map,
             remote_urls,
             root_dir: init_params.root_path,
