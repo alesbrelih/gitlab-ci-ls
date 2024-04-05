@@ -156,6 +156,27 @@ This extension supports configuration which needs to be set up because _gitlab-c
 
 ![vscode settings](./docs/images/vscode-settings.jpg)
 
+## Emacs lsp-mode configuration
+
+To use `gitlab-ci-ls` with Emacs `lsp-mode`, reference the below sample
+configuration.
+
+``` emacs-lisp
+(add-to-list 'lsp-language-id-configuration '("\\.gitlab-ci\\.yml$" . "gitlabci"))
+(add-to-list 'lsp-language-id-configuration '("/ci-templates/.*\\.yml$" . "gitlabci"))
+
+(lsp-register-custom-settings
+  '(("gitlabci.cache" "/path/where/remote/folders/will/be/cached")
+    ("gitlabci.log_path" "/tmp/gitlab-ci-ls.log")))
+
+(lsp-register-client
+  (make-lsp-client :new-connection (lsp-stdio-connection '("gitlab-ci-ls"))
+                  :activation-fn (lsp-activate-on "gitlabci")
+                  :server-id 'gitlabci
+                  :priority 10
+                  :initialization-options (lambda () (gethash "gitlabci" (lsp-configuration-section "gitlabci")))))
+```
+
 ## TODO
 
 - [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
