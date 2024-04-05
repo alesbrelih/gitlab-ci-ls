@@ -60,6 +60,8 @@ impl LSPHandlers {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap();
+
         let uri = &params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&uri.to_string())?;
 
@@ -69,35 +71,33 @@ impl LSPHandlers {
         let word = parser_utils::ParserUtils::extract_word(line, position.character as usize)?
             .trim_end_matches(':');
 
-        let mut hover = String::new();
-        for (content_uri, content) in store.iter() {
-            if let Some(element) = self.parser.get_root_node(content_uri, content, word) {
-                // Check if we found the same line that triggered the hover event and discard it
-                // adding format : because yaml parser removes it from the key
-                if content_uri.ends_with(uri.as_str())
-                    && line.eq(&format!("{}:", element.key.as_str()))
-                {
-                    continue;
+        match self.parser.get_position_type(document, position) {
+            parser::PositionType::Extend | parser::PositionType::RootNode => {
+                for (document_uri, node) in nodes.iter() {
+                    for (key, content) in node {
+                        if key.eq(word) {
+                            let cnt = self.parser.get_full_definition(
+                                GitlabElement {
+                                    key: key.clone(),
+                                    content: Some(content.to_string()),
+                                    uri: document_uri.to_string(),
+                                    ..Default::default()
+                                },
+                                &store,
+                            )?;
+
+                            return Some(LSPResult::Hover(HoverResult {
+                                id: request.id,
+                                content: format!("```yaml\n{cnt}\n```"),
+                            }));
+                        }
+                    }
                 }
 
-                if !hover.is_empty() {
-                    hover = format!("{hover}\r\n--------\r\n");
-                }
-
-                hover = format!("{}{}", hover, element.content?);
+                None
             }
+            _ => None,
         }
-
-        if hover.is_empty() {
-            return None;
-        }
-
-        hover = format!("```yaml \r\n{hover}\r\n```");
-
-        Some(LSPResult::Hover(HoverResult {
-            id: request.id,
-            content: hover,
-        }))
     }
 
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {

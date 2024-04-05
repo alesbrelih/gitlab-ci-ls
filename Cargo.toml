@@ -24,6 +24,7 @@ tree-sitter-yaml = "0.0.1"
 yaml-rust = "0.4.5"
 reqwest = { version = "0.12.2", features = ["blocking"] }
 regex = "1.10.4"
+serde_yaml = "0.9.34"
 
 [lints.clippy]
 all = "deny"

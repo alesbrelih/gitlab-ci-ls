@@ -40,6 +40,11 @@ pub trait Parser {
         position: Position,
         store: &HashMap<String, String>,
     ) -> Option<Vec<GitlabElement>>;
+    fn get_full_definition(
+        &self,
+        element: GitlabElement,
+        store: &HashMap<String, String>,
+    ) -> Option<String>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -69,6 +74,48 @@ impl ParserImpl {
         ParserImpl {
             treesitter,
             git: Box::new(git::GitImpl::new(remote_urls, package_map, cache_path)),
+        }
+    }
+
+    fn merge_yaml_nodes(base: &serde_yaml::Value, other: &serde_yaml::Value) -> serde_yaml::Value {
+        match (base, other) {
+            // When both values are mappings, merge them.
+            (serde_yaml::Value::Mapping(base_map), serde_yaml::Value::Mapping(other_map)) => {
+                let mut merged_map = serde_yaml::Mapping::new();
+
+                // Insert all values from the base map first.
+                for (k, v) in base_map {
+                    merged_map.insert(k.clone(), v.clone());
+                }
+
+                // Then merge or replace with values from the other map.
+                for (k, v) in other_map {
+                    if k == "extends" {
+                        // 'extends' field in other node takes precedence.
+                        merged_map.insert(k.clone(), v.clone());
+                    } else if let Some(serde_yaml::Value::Sequence(_)) = base_map.get(k) {
+                        // If the key is an array and exists in base, it takes precedence, do nothing.
+                    } else {
+                        // For all other cases, insert or replace the value from the other map.
+                        merged_map.insert(
+                            k.clone(),
+                            ParserImpl::merge_yaml_nodes(
+                                base_map.get(k).unwrap_or(&serde_yaml::Value::Null),
+                                v,
+                            ),
+                        );
+                    }
+                }
+
+                // Handle the edge case for 'extends' if it does not exist in the second node.
+                if base_map.contains_key("extends") && !other_map.contains_key("extends") {
+                    merged_map.remove(&serde_yaml::Value::String("extends".to_string()));
+                }
+
+                serde_yaml::Value::Mapping(merged_map)
+            }
+            // When values are not mappings, other takes precedence.
+            (_, _) => other.clone(),
         }
     }
 
@@ -376,5 +423,46 @@ impl Parser for ParserImpl {
                 })
                 .collect(),
         )
+    }
+
+    fn get_full_definition(
+        &self,
+        element: GitlabElement,
+        store: &HashMap<String, String>,
+    ) -> Option<String> {
+        let mut all_nodes = vec![];
+
+        self.all_nodes(store, &mut all_nodes, element.clone(), 0);
+
+        let root_node = all_nodes[0].clone();
+        let cnt = root_node
+            .content?
+            .clone()
+            .lines()
+            .skip(1)
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        let mut merged: serde_yaml::Value = serde_yaml::from_str(cnt.as_str()).ok()?;
+
+        for node in all_nodes {
+            let cnt = node
+                .content?
+                .lines()
+                .skip(1)
+                .collect::<Vec<&str>>()
+                .join("\n");
+
+            let current: serde_yaml::Value = serde_yaml::from_str(cnt.as_str()).ok()?;
+
+            merged = ParserImpl::merge_yaml_nodes(&merged, &current);
+        }
+
+        let mut top_level_map = serde_yaml::Mapping::new();
+        top_level_map.insert(serde_yaml::Value::String(element.key), merged);
+
+        let merged_with_key = serde_yaml::Value::Mapping(top_level_map);
+
+        serde_yaml::to_string(&merged_with_key).ok()
     }
 }
