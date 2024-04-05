@@ -19,7 +19,7 @@ jobs:
       - name: Lint the code
         run: cargo clippy --all-targets --all-features
   test:
-    name: Lint the code.
+    name: Unit test the code.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
