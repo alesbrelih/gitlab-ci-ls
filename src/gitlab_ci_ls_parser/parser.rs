@@ -54,6 +54,7 @@ pub struct ParserImpl {
 }
 
 // TODO: rooot for the case of importing f9
+#[derive(Debug)]
 pub enum PositionType {
     Extend,
     Stage,

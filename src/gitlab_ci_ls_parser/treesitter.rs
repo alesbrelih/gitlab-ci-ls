@@ -477,7 +477,8 @@ impl Treesitter for TreesitterImpl {
         // 3. variables
         // 4. root nodes
         // 4. local includes
-        // 5. remote includes
+        // 5. project includes
+        // 6. remote includes
         let query_source = r#"
 
             (
@@ -1695,5 +1696,288 @@ job_one:
         let variable_definition = treesitter.job_variable_definition(uri, cnt, "NOVAR", "job_one");
 
         assert!(variable_definition.is_none());
+    }
+
+    #[test]
+    fn test_get_position_type_include_remote() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let project_file = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 5,
+                character: 13,
+            },
+        );
+
+        let want_project = "myproject/name";
+        let want_reference = "1.5.0".to_string();
+        let want_file = "\"/resources/ci-templates/mytemplate.yml\"".to_string();
+        match project_file {
+            parser::PositionType::Include(IncludeInformation {
+                remote:
+                    Some(RemoteInclude {
+                        project: Some(project),
+                        reference: Some(reference),
+                        file: Some(file),
+                    }),
+                local: None,
+                remote_url: None,
+            }) => {
+                assert_eq!(want_project, project);
+                assert_eq!(want_reference, reference);
+                assert_eq!(want_file, file);
+            }
+            _ => panic!("project file is invalid"),
+        }
+    }
+
+    #[test]
+    fn test_get_position_type_include_local() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let project_file = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 6,
+                character: 10,
+            },
+        );
+
+        let want_path = "\".my-local.yml\"";
+        match project_file {
+            parser::PositionType::Include(IncludeInformation {
+                remote: None,
+                local: Some(Include { path }),
+                remote_url: None,
+            }) => {
+                assert_eq!(want_path, path);
+            }
+            _ => panic!("project file is invalid"),
+        }
+    }
+
+    #[test]
+    fn test_get_position_type_include_remote_url() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 7,
+                character: 15,
+            },
+        );
+
+        let want_path = "\"https://myremote.com/template.yml\"";
+        match pos_type {
+            parser::PositionType::Include(IncludeInformation {
+                remote: None,
+                local: None,
+                remote_url: Some(Include { path }),
+            }) => {
+                assert_eq!(want_path, path);
+            }
+            _ => panic!("invalid type"),
+        }
+    }
+
+    #[test]
+    fn test_get_position_type_extend() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 11,
+                character: 12,
+            },
+        );
+
+        assert!(matches!(pos_type, parser::PositionType::Extend));
+    }
+
+    #[test]
+    fn test_get_position_type_stage() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 12,
+                character: 10,
+            },
+        );
+
+        assert!(matches!(pos_type, parser::PositionType::Stage));
+    }
+
+    #[test]
+    fn test_get_position_type_root_node() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 9,
+                character: 4,
+            },
+        );
+
+        assert!(matches!(pos_type, parser::PositionType::RootNode));
+    }
+
+    #[test]
+    fn test_get_position_type_root_variable() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    ref: 1.5.0
+    file:
+      - "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 17,
+                character: 12,
+            },
+        );
+
+        let want_name = "job_one";
+        match pos_type {
+            parser::PositionType::Needs(NodeDefinition { name }) => {
+                assert_eq!(want_name, name);
+            }
+            _ => panic!("invalid type"),
+        }
     }
 }
