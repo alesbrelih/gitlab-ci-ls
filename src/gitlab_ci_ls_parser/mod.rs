@@ -10,13 +10,13 @@ pub mod parser;
 pub mod parser_utils;
 pub mod treesitter;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct LSPPosition {
     pub line: u32,
     pub character: u32,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Range {
     pub start: LSPPosition,
     pub end: LSPPosition,

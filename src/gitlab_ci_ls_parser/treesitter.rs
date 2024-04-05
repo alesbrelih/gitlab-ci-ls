@@ -1019,3 +1019,405 @@ impl Treesitter for TreesitterImpl {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_get_root_node() {
+        let cnt = r"
+first:
+  variables:
+    TEST: 5
+  list:
+    - should
+    - be
+    - ignored
+searched:
+  third_var: 3
+  forth_var: 4
+forth: 5
+";
+
+        let key = "searched";
+        let uri = "file://mocked";
+
+        let treesitter = TreesitterImpl::new();
+        let root_node = treesitter.get_root_node(uri, cnt, "searched");
+        assert!(root_node.is_some(), "root_node should be set");
+
+        let root_node = root_node.unwrap();
+        assert_eq!(root_node.key, key, "key should be 'searched'");
+        assert_eq!(root_node.uri, uri, "uri doesn't match");
+
+        assert!(root_node.content.is_some(), "content should be set");
+        let content = root_node.content.unwrap();
+
+        let wanted_content = r"searched:
+  third_var: 3
+  forth_var: 4";
+
+        assert_eq!(content, wanted_content, "content doesn't match");
+        assert_eq!(
+            root_node.range.start,
+            LSPPosition {
+                line: 8,
+                character: 0
+            },
+            "invalid start"
+        );
+
+        assert_eq!(
+            root_node.range.end,
+            LSPPosition {
+                line: 10,
+                character: 14
+            },
+            "invalid end"
+        );
+    }
+
+    #[test]
+    fn test_invalid_get_root_node() {
+        let cnt = r"
+first:
+  variables:
+    TEST: 5
+  list:
+    - should
+    - be
+    - ignored
+searched:
+  third_var: 3
+  forth_var: 4
+forth: 5
+";
+
+        let uri = "file://mocked";
+
+        let treesitter = TreesitterImpl::new();
+        let root_node = treesitter.get_root_node(uri, cnt, "invalid");
+        assert!(root_node.is_none(), "root_node should not be set");
+    }
+
+    #[test]
+    fn test_get_all_root_nodes() {
+        let cnt = r"
+first:
+  variables:
+    TEST: 5
+  list:
+    - should
+    - be
+    - ignored
+searched:
+  third_var: 3
+  forth_var: 4
+forth: 5
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let root_nodes = treesitter.get_all_root_nodes(uri, cnt);
+        assert_eq!(root_nodes.len(), 3, "should find 3 nodes");
+
+        let keys = ["first", "searched", "forth"];
+
+        let cnt_0 = r"first:
+  variables:
+    TEST: 5
+  list:
+    - should
+    - be
+    - ignored";
+
+        let cnt_1 = r"searched:
+  third_var: 3
+  forth_var: 4";
+
+        let cnt_2 = "forth: 5";
+
+        let cnts = [cnt_0, cnt_1, cnt_2];
+
+        for (idx, node) in root_nodes.iter().enumerate() {
+            assert_eq!(node.key, keys[idx]);
+            assert_eq!(node.uri, uri);
+
+            assert!(node.content.is_some());
+            let content = node.content.clone().unwrap();
+
+            assert_eq!(content, cnts[idx]);
+            assert_eq!(
+                node.range,
+                Range {
+                    ..Default::default()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_root_variables() {
+        let cnt = r"
+first:
+  variables:
+    TEST: 5
+  list:
+    - item
+variables:
+  first_var: 3
+  second_var: 4
+forth: 5
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let root_variables = treesitter.get_root_variables(uri, cnt);
+
+        assert_eq!(root_variables.len(), 2);
+
+        let vars = ["first_var", "second_var"];
+        let starts = [
+            LSPPosition {
+                line: 7,
+                character: 2,
+            },
+            LSPPosition {
+                line: 8,
+                character: 2,
+            },
+        ];
+        let ends = [
+            LSPPosition {
+                line: 7,
+                character: 11,
+            },
+            LSPPosition {
+                line: 8,
+                character: 12,
+            },
+        ];
+
+        for (idx, var) in root_variables.iter().enumerate() {
+            assert!(var.content.is_none());
+            assert_eq!(var.uri, uri);
+            assert_eq!(var.key, vars[idx]);
+            assert_eq!(var.key, vars[idx]);
+            assert_eq!(var.range.start, starts[idx]);
+            assert_eq!(var.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_stage_definitions() {
+        let cnt = r"
+variables:
+  first_var: 3
+  second_var: 4
+stages:
+  - first_stage
+  - second_stage
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let stage_definitions = treesitter.get_stage_definitions(uri, cnt);
+
+        assert_eq!(stage_definitions.len(), 2);
+
+        let stages = ["first_stage", "second_stage"];
+        let starts = [
+            LSPPosition {
+                line: 5,
+                character: 4,
+            },
+            LSPPosition {
+                line: 6,
+                character: 4,
+            },
+        ];
+        let ends = [
+            LSPPosition {
+                line: 5,
+                character: 15,
+            },
+            LSPPosition {
+                line: 6,
+                character: 16,
+            },
+        ];
+
+        for (idx, var) in stage_definitions.iter().enumerate() {
+            assert!(var.content.is_none());
+            assert_eq!(var.uri, uri);
+            assert_eq!(var.key, stages[idx]);
+            assert_eq!(var.key, stages[idx]);
+            assert_eq!(var.range.start, starts[idx]);
+            assert_eq!(var.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_stages() {
+        let cnt = r"
+job_one:
+  image: alpine
+  stage: first
+
+job_two:
+  image: ubuntu
+  stage: second
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_stages = treesitter.get_all_stages(uri, cnt);
+
+        assert_eq!(all_stages.len(), 2);
+
+        let stages = ["first", "second"];
+        let starts = [
+            LSPPosition {
+                line: 3,
+                character: 9,
+            },
+            LSPPosition {
+                line: 7,
+                character: 9,
+            },
+        ];
+        let ends = [
+            LSPPosition {
+                line: 3,
+                character: 14,
+            },
+            LSPPosition {
+                line: 7,
+                character: 15,
+            },
+        ];
+
+        for (idx, var) in all_stages.iter().enumerate() {
+            assert!(var.content.is_none());
+            assert_eq!(var.uri, uri);
+            assert_eq!(var.key, stages[idx]);
+            assert_eq!(var.key, stages[idx]);
+            assert_eq!(var.range.start, starts[idx]);
+            assert_eq!(var.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_extends() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_extends = treesitter.get_all_extends(uri.to_string(), cnt, None);
+
+        assert_eq!(all_extends.len(), 2);
+
+        let extends = [".first", ".second"];
+        let starts = [
+            LSPPosition {
+                line: 3,
+                character: 11,
+            },
+            LSPPosition {
+                line: 8,
+                character: 11,
+            },
+        ];
+        let ends = [
+            LSPPosition {
+                line: 3,
+                character: 17,
+            },
+            LSPPosition {
+                line: 8,
+                character: 18,
+            },
+        ];
+
+        for (idx, var) in all_extends.iter().enumerate() {
+            assert!(var.content.is_none());
+            assert_eq!(var.uri, uri);
+            assert_eq!(var.key, extends[idx]);
+            assert_eq!(var.key, extends[idx]);
+            assert_eq!(var.range.start, starts[idx]);
+            assert_eq!(var.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_extends_with_name() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_extends = treesitter.get_all_extends(uri.to_string(), cnt, Some(".second"));
+
+        assert_eq!(all_extends.len(), 1);
+
+        let extends = [".second"];
+        let starts = [LSPPosition {
+            line: 8,
+            character: 11,
+        }];
+        let ends = [LSPPosition {
+            line: 8,
+            character: 18,
+        }];
+
+        for (idx, var) in all_extends.iter().enumerate() {
+            assert!(var.content.is_none());
+            assert_eq!(var.uri, uri);
+            assert_eq!(var.key, extends[idx]);
+            assert_eq!(var.key, extends[idx]);
+            assert_eq!(var.range.start, starts[idx]);
+            assert_eq!(var.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_extends_no_results() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_extends = treesitter.get_all_extends(uri.to_string(), cnt, Some(".invalid"));
+
+        assert_eq!(all_extends.len(), 0);
+    }
+}
