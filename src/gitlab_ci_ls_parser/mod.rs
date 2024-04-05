@@ -5,6 +5,7 @@ use lsp_types::Diagnostic;
 
 pub mod git;
 pub mod handlers;
+pub mod messages;
 pub mod parser;
 pub mod parser_utils;
 pub mod treesitter;
