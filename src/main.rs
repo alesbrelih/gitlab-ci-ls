@@ -1,21 +1,20 @@
 use git2::Repository;
-use log::{error, info, warn, LevelFilter};
+use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use lsp_server::{Connection, Message, Response};
+use lsp_server::Connection;
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit,
-    DiagnosticServerCapabilities, DocumentFilter, FullDocumentDiagnosticReport, Hover,
-    HoverContents, LocationLink, MarkedString, MarkupContent, Position, ServerCapabilities,
-    TextDocumentSyncKind, TextEdit, Url, WorkDoneProgressOptions,
+    DiagnosticServerCapabilities, DocumentFilter, ServerCapabilities, TextDocumentSyncKind,
+    WorkDoneProgressOptions,
 };
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
-use std::process::exit;
+
+use crate::gitlab_ci_ls_parser::messages;
 
 mod gitlab_ci_ls_parser;
 
@@ -55,8 +54,6 @@ fn default_cache_path() -> String {
     )
 }
 
-// TODO: refactor and remove the next line :)
-#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
@@ -157,226 +154,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     info!("initialized");
 
-    for msg in &connection.receiver {
-        info!("received message {:?}", msg);
-
-        let msg_clone = msg.clone();
-        let result = match msg_clone {
-            // TODO: implement workspace/didChangeConfiguration
-            Message::Notification(notification) => match notification.method.as_str() {
-                "textDocument/didOpen" => lsp_events.on_open(notification),
-                "textDocument/didChange" => lsp_events.on_change(notification),
-                "textDocument/didSave" => lsp_events.on_save(notification),
-                _ => {
-                    warn!("invalid notification method: {:?}", notification);
-                    None
-                }
-            },
-            Message::Request(request) => match request.method.as_str() {
-                "textDocument/hover" => lsp_events.on_hover(request),
-                "textDocument/definition" => lsp_events.on_definition(request),
-                "textDocument/references" => lsp_events.on_references(request),
-                "textDocument/completion" => lsp_events.on_completion(request),
-                "textDocument/diagnostic" => lsp_events.on_diagnostic(request),
-                "shutdown" => {
-                    error!("SHUTDOWN!!");
-                    exit(0);
-                }
-                method => {
-                    warn!("invalid request method: {:?}", method);
-                    None
-                }
-            },
-            Message::Response(request) => {
-                warn!("unhandled message {:?}", request);
-                None
-            }
-        };
-
-        info!("got result {:?}", &result);
-
-        let sent = match result {
-            Some(gitlab_ci_ls_parser::LSPResult::Hover(hover_result)) => {
-                info!("send hover msg: {:?}", hover_result);
-
-                let msg = Message::Response(Response {
-                    id: hover_result.id,
-                    result: serde_json::to_value(Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(hover_result.content)),
-                        range: None,
-                    })
-                    .ok(),
-                    error: None,
-                });
-
-                connection.sender.send(msg)
-            }
-            Some(gitlab_ci_ls_parser::LSPResult::Completion(completion_result)) => {
-                info!("send completion msg: {:?}", completion_result);
-
-                let msg = Message::Response(Response {
-                    id: completion_result.id,
-                    result: serde_json::to_value(CompletionList {
-                        items: completion_result
-                            .list
-                            .iter()
-                            .map(|c| {
-                                let mut item = CompletionItem {
-                                    label: c.label.clone(),
-                                    kind: Some(CompletionItemKind::KEYWORD),
-                                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                                        new_text: c.label.clone(),
-                                        range: lsp_types::Range {
-                                            start: Position {
-                                                line: c.location.range.start.line,
-                                                character: c.location.range.start.character,
-                                            },
-                                            end: Position {
-                                                line: c.location.range.end.line,
-                                                character: c.location.range.end.character,
-                                            },
-                                        },
-                                    })),
-                                    ..Default::default()
-                                };
-
-                                if let Some(documentation) = c.details.clone() {
-                                    item.documentation = Some(
-                                        lsp_types::Documentation::MarkupContent(MarkupContent {
-                                            kind: lsp_types::MarkupKind::Markdown,
-                                            value: format!(
-                                                "```yaml\r\n{}\r\n```",
-                                                documentation.clone()
-                                            ),
-                                        }),
-                                    );
-                                }
-
-                                item
-                            })
-                            .collect(),
-                        is_incomplete: false,
-                    })
-                    .ok(),
-                    error: None,
-                });
-
-                connection.sender.send(msg)
-            }
-            Some(gitlab_ci_ls_parser::LSPResult::Definition(definition_result)) => {
-                info!("send definition msg: {:?}", definition_result);
-
-                let locations: Vec<LocationLink> = definition_result
-                    .locations
-                    .iter()
-                    .map(|l| LocationLink {
-                        target_uri: Url::parse(&l.uri).unwrap(),
-                        origin_selection_range: None,
-                        target_selection_range: lsp_types::Range {
-                            start: Position {
-                                character: l.range.start.character,
-                                line: l.range.start.line,
-                            },
-                            end: Position {
-                                character: l.range.end.character,
-                                line: l.range.end.line,
-                            },
-                        },
-                        target_range: lsp_types::Range {
-                            start: Position {
-                                character: l.range.start.character,
-                                line: l.range.start.line,
-                            },
-                            end: Position {
-                                character: l.range.end.character,
-                                line: l.range.end.line,
-                            },
-                        },
-                    })
-                    .collect();
-
-                let msg = Message::Response(Response {
-                    id: definition_result.id,
-                    result: serde_json::to_value(locations).ok(),
-                    error: None,
-                });
-
-                connection.sender.send(msg)
-            }
-            Some(gitlab_ci_ls_parser::LSPResult::References(references_result)) => {
-                info!("send definition msg: {:?}", references_result);
-
-                let locations: Vec<LocationLink> = references_result
-                    .locations
-                    .iter()
-                    .map(|l| LocationLink {
-                        target_uri: Url::parse(&l.uri).unwrap(),
-                        origin_selection_range: None,
-                        target_selection_range: lsp_types::Range {
-                            start: Position {
-                                character: l.range.start.character,
-                                line: l.range.start.line,
-                            },
-                            end: Position {
-                                character: l.range.end.character,
-                                line: l.range.end.line,
-                            },
-                        },
-                        target_range: lsp_types::Range {
-                            start: Position {
-                                character: l.range.start.character,
-                                line: l.range.start.line,
-                            },
-                            end: Position {
-                                character: l.range.end.character,
-                                line: l.range.end.line,
-                            },
-                        },
-                    })
-                    .collect();
-
-                let msg = Message::Response(Response {
-                    id: references_result.id,
-                    result: serde_json::to_value(locations).ok(),
-                    error: None,
-                });
-
-                connection.sender.send(msg)
-            }
-            Some(gitlab_ci_ls_parser::LSPResult::Diagnostics(diagnostics)) => {
-                let msg = Message::Response(Response {
-                    id: diagnostics.id,
-                    result: serde_json::to_value(FullDocumentDiagnosticReport {
-                        items: diagnostics.diagnostics,
-                        ..Default::default()
-                    })
-                    .ok(),
-                    error: None,
-                });
-
-                connection.sender.send(msg)
-            }
-            None => match msg {
-                Message::Request(req) => {
-                    let msg = Message::Response(Response {
-                        id: req.id,
-                        result: Some(serde_json::Value::Null),
-                        error: None,
-                    });
-
-                    connection.sender.send(msg)
-                }
-                _ => Ok(()),
-            },
-        };
-
-        match sent {
-            Err(err) => {
-                error!("error sending: {:?}", err);
-            }
-            Ok(()) => continue,
-        }
-    }
+    messages::Messages::new(connection, lsp_events).handle();
 
     io_threads.join()?;
 
