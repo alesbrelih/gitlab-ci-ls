@@ -121,34 +121,34 @@ impl Git for GitImpl {
 
         self.clone_repo(repo_dest.as_str(), remote_tag, remote_pkg);
 
-        let mut files = vec![];
-        for file in remote_files {
-            let file_path = format!("{repo_dest}{file}");
-            debug!("filepath: {}", file_path);
+        let files = remote_files
+            .iter()
+            .filter_map(|file| {
+                let file_path = format!("{repo_dest}{file}");
+                debug!("filepath: {}", file_path);
 
-            let content = match std::fs::read_to_string(&file_path) {
-                Ok(content) => content,
-                Err(err) => {
-                    error!("error reading content from: {}; got err {}", file_path, err);
+                let content = match std::fs::read_to_string(&file_path) {
+                    Ok(content) => content,
+                    Err(err) => {
+                        error!("error reading content from: {}; got err {}", file_path, err);
+                        return None;
+                    }
+                };
 
-                    continue;
-                }
-            };
+                let uri = match Url::parse(format!("file://{file_path}").as_str()) {
+                    Ok(uri) => uri,
+                    Err(err) => {
+                        error!("error generating uri; got err {}", err);
+                        return None;
+                    }
+                };
 
-            let uri = match Url::parse(format!("file://{}", &file_path).as_str()) {
-                Ok(uri) => uri,
-                Err(err) => {
-                    error!("error generating uri; got err {}", err);
-
-                    continue;
-                }
-            };
-
-            files.push(GitlabFile {
-                path: uri.to_string(),
-                content,
-            });
-        }
+                Some(GitlabFile {
+                    path: uri.to_string(),
+                    content,
+                })
+            })
+            .collect();
 
         Ok(files)
     }

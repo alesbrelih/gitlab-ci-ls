@@ -61,7 +61,7 @@ impl LSPHandlers {
 
         let store = self.store.lock().unwrap();
         let uri = &params.text_document_position_params.text_document.uri;
-        let document = store.get::<String>(&uri.clone().into())?;
+        let document = store.get::<String>(&uri.to_string())?;
 
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
@@ -203,7 +203,7 @@ impl LSPHandlers {
         let store = self.store.lock().unwrap();
         let store = &*store;
         let document_uri = params.text_document_position_params.text_document.uri;
-        let document = store.get::<String>(&document_uri.clone().into())?;
+        let document = store.get::<String>(&document_uri.to_string())?;
         let position = params.text_document_position_params.position;
 
         let mut locations: Vec<LSPLocation> = vec![];
@@ -682,7 +682,7 @@ impl LSPHandlers {
 
         let stages = self
             .parser
-            .get_all_stages(params.text_document.uri.to_string(), content.as_str());
+            .get_all_stages(params.text_document.uri.as_str(), content.as_str());
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -744,7 +744,7 @@ impl LSPHandlers {
 
         let store = self.store.lock().unwrap();
         let document_uri = &params.text_document_position.text_document.uri;
-        let document = store.get::<String>(&document_uri.clone().into())?;
+        let document = store.get::<String>(&document_uri.to_string())?;
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;

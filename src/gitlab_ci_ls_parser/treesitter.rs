@@ -14,7 +14,7 @@ pub trait Treesitter {
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
-    fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement>;
+    fn get_all_stages(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_extends(
         &self,
         uri: String,
@@ -309,7 +309,7 @@ impl Treesitter for TreesitterImpl {
         stages
     }
 
-    fn get_all_stages(&self, uri: String, content: &str) -> Vec<GitlabElement> {
+    fn get_all_stages(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -359,7 +359,7 @@ impl Treesitter for TreesitterImpl {
                     extends.push(GitlabElement {
                         key: text.to_owned(),
                         content: None,
-                        uri: uri.clone(),
+                        uri: uri.to_string(),
                         range: Range {
                             start: LSPPosition {
                                 line: u32::try_from(c.node.start_position().row).unwrap_or(0),
