@@ -997,14 +997,11 @@ impl Treesitter for TreesitterImpl {
             .find(|c| c.index == 2)
             .map(|c| {
                 let text = content[c.node.byte_range()].to_string();
-                let key = text.lines().collect::<Vec<&str>>()[0]
-                    .trim_end_matches(':')
-                    .to_string();
 
                 GitlabElement {
                     uri: uri.to_string(),
-                    key,
-                    content: Some(text),
+                    key: text,
+                    content: None,
                     range: Range {
                         start: LSPPosition {
                             line: u32::try_from(c.node.start_position().row).unwrap_or(0),
@@ -1350,13 +1347,13 @@ job_two:
             },
         ];
 
-        for (idx, var) in all_extends.iter().enumerate() {
-            assert!(var.content.is_none());
-            assert_eq!(var.uri, uri);
-            assert_eq!(var.key, extends[idx]);
-            assert_eq!(var.key, extends[idx]);
-            assert_eq!(var.range.start, starts[idx]);
-            assert_eq!(var.range.end, ends[idx]);
+        for (idx, extend) in all_extends.iter().enumerate() {
+            assert!(extend.content.is_none());
+            assert_eq!(extend.uri, uri);
+            assert_eq!(extend.key, extends[idx]);
+            assert_eq!(extend.key, extends[idx]);
+            assert_eq!(extend.range.start, starts[idx]);
+            assert_eq!(extend.range.end, ends[idx]);
         }
     }
 
@@ -1390,13 +1387,13 @@ job_two:
             character: 18,
         }];
 
-        for (idx, var) in all_extends.iter().enumerate() {
-            assert!(var.content.is_none());
-            assert_eq!(var.uri, uri);
-            assert_eq!(var.key, extends[idx]);
-            assert_eq!(var.key, extends[idx]);
-            assert_eq!(var.range.start, starts[idx]);
-            assert_eq!(var.range.end, ends[idx]);
+        for (idx, extend) in all_extends.iter().enumerate() {
+            assert!(extend.content.is_none());
+            assert_eq!(extend.uri, uri);
+            assert_eq!(extend.key, extends[idx]);
+            assert_eq!(extend.key, extends[idx]);
+            assert_eq!(extend.range.start, starts[idx]);
+            assert_eq!(extend.range.end, ends[idx]);
         }
     }
 
@@ -1419,5 +1416,284 @@ job_two:
         let all_extends = treesitter.get_all_extends(uri.to_string(), cnt, Some(".invalid"));
 
         assert_eq!(all_extends.len(), 0);
+    }
+
+    #[test]
+    fn test_get_all_job_needs() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  needs:
+    - job: job_one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_job_needs = treesitter.get_all_job_needs(uri.to_string(), cnt, None);
+
+        assert_eq!(all_job_needs.len(), 2);
+
+        let extends = ["job_one", "job_two_len"];
+        let starts = [
+            LSPPosition {
+                line: 6,
+                character: 11,
+            },
+            LSPPosition {
+                line: 13,
+                character: 11,
+            },
+        ];
+        let ends = [
+            LSPPosition {
+                line: 6,
+                character: 18,
+            },
+            LSPPosition {
+                line: 13,
+                character: 22,
+            },
+        ];
+
+        for (idx, need) in all_job_needs.iter().enumerate() {
+            assert!(need.content.is_none());
+            assert_eq!(need.uri, uri);
+            assert_eq!(need.key, extends[idx]);
+            assert_eq!(need.key, extends[idx]);
+            assert_eq!(need.range.start, starts[idx]);
+            assert_eq!(need.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_job_needs_with_name() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  needs:
+    - job: job_one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_job_needs = treesitter.get_all_job_needs(uri.to_string(), cnt, Some("job_two_len"));
+
+        let extends = ["job_two_len"];
+        assert_eq!(all_job_needs.len(), extends.len());
+
+        let starts = [LSPPosition {
+            line: 13,
+            character: 11,
+        }];
+        let ends = [LSPPosition {
+            line: 13,
+            character: 22,
+        }];
+
+        for (idx, need) in all_job_needs.iter().enumerate() {
+            assert!(need.content.is_none());
+            assert_eq!(need.uri, uri);
+            assert_eq!(need.key, extends[idx]);
+            assert_eq!(need.key, extends[idx]);
+            assert_eq!(need.range.start, starts[idx]);
+            assert_eq!(need.range.end, ends[idx]);
+        }
+    }
+
+    #[test]
+    fn test_get_all_job_needs_with_invalid_name() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  needs:
+    - job: job_one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let all_job_needs = treesitter.get_all_job_needs(uri.to_string(), cnt, Some("invalid"));
+
+        assert_eq!(all_job_needs.len(), 0);
+    }
+
+    #[test]
+    fn test_get_root_node_at_position() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  needs:
+    - job: job_one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        let treesitter = TreesitterImpl::new();
+        let root_node = treesitter.get_root_node_at_position(
+            cnt,
+            Position {
+                line: 9,
+                character: 10,
+            },
+        );
+
+        let wanted_cnt = r"job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        assert!(root_node.is_some());
+        let root_node = root_node.unwrap();
+        assert_eq!(root_node.key, "job_two");
+        assert_eq!(root_node.content, Some(wanted_cnt.to_string()));
+    }
+
+    #[test]
+    fn test_get_root_node_at_position_invalid_position() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  needs:
+    - job: job_one
+
+job_two:
+  image: ubuntu
+  extends: .second
+  stage: two
+  needs:
+    - job: job_two_len
+";
+
+        let treesitter = TreesitterImpl::new();
+        let root_node = treesitter.get_root_node_at_position(
+            cnt,
+            Position {
+                line: 20,
+                character: 10,
+            },
+        );
+
+        assert!(root_node.is_none());
+    }
+
+    #[test]
+    fn test_job_variable_definition() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let variable_definition =
+            treesitter.job_variable_definition(uri, cnt, "SEARCHED", "job_one");
+
+        assert!(variable_definition.is_some());
+
+        let variable_definition = variable_definition.unwrap();
+        assert_eq!(variable_definition.key, "SEARCHED");
+        assert!(variable_definition.content.is_none());
+        assert_eq!(
+            variable_definition.range.start,
+            LSPPosition {
+                line: 6,
+                character: 4,
+            }
+        );
+        assert_eq!(
+            variable_definition.range.end,
+            LSPPosition {
+                line: 6,
+                character: 12,
+            }
+        );
+    }
+
+    #[test]
+    fn test_job_variable_definition_invalid_job_name() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let variable_definition =
+            treesitter.job_variable_definition(uri, cnt, "SEARCHED", "invalid_job");
+
+        assert!(variable_definition.is_none());
+    }
+
+    #[test]
+    fn test_job_variable_definition_invalid_var_name() {
+        let cnt = r"
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+";
+
+        let uri = "file://mocked";
+        let treesitter = TreesitterImpl::new();
+        let variable_definition = treesitter.job_variable_definition(uri, cnt, "NOVAR", "job_one");
+
+        assert!(variable_definition.is_none());
     }
 }
