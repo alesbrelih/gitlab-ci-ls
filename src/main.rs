@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use git2::Repository;
 use log::{error, info, LevelFilter};
 use regex::Regex;
@@ -11,7 +12,8 @@ use lsp_types::{
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 
 use crate::gitlab_ci_ls_parser::messages;
@@ -142,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         .filter_map(|remote| get_remote_hosts(remote.as_str()))
         .collect();
 
-    // get_remote_urls(repo.remotes()?.iter())?;
+    save_base_files(&init_params)?;
 
     let lsp_events =
         gitlab_ci_ls_parser::handlers::LSPHandlers::new(gitlab_ci_ls_parser::LSPConfig {
@@ -157,6 +159,21 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     messages::Messages::new(connection, lsp_events).handle();
 
     io_threads.join()?;
+
+    Ok(())
+}
+
+fn save_base_files(init_params: &InitializationParams) -> anyhow::Result<()> {
+    let base_path = format!("{}base", init_params.initialization_options.cache_path);
+    fs::create_dir_all(&base_path)?;
+
+    let gitlab_predefined = include_str!("./resources/gitlab_predefined_vars.yaml");
+    let gitlab_predefined_path = format!("{base_path}/gitlab_predefined_vars.yaml");
+    info!("predefined path: {}", gitlab_predefined_path);
+
+    let mut file = File::create(&gitlab_predefined_path)
+        .map_err(|e| anyhow!("error creating file: {gitlab_predefined_path}; got err: {e}"))?;
+    file.write_all(gitlab_predefined.as_bytes())?;
 
     Ok(())
 }

@@ -260,23 +260,109 @@ impl Parser for ParserImpl {
             parse_results.stages = found_stages;
         }
 
-        let element = self
+        if let Some(element) = self
             .treesitter
-            .get_root_node(uri.as_str(), content, "include")?;
+            .get_root_node(uri.as_str(), content, "include")
+        {
+            let documents = YamlLoader::load_from_str(element.content?.as_str()).ok()?;
+            let content = &documents[0];
+            if let Yaml::Hash(include_root) = content {
+                for (_, root) in include_root {
+                    if let Yaml::Array(includes) = root {
+                        for include in includes {
+                            if let Yaml::Hash(item) = include {
+                                let mut remote_pkg = String::new();
+                                let mut remote_tag = String::new();
+                                let mut remote_files: Vec<String> = vec![];
 
-        let documents = YamlLoader::load_from_str(element.content?.as_str()).ok()?;
-        let content = &documents[0];
+                                for (key, item_value) in item {
+                                    if follow && !remote_pkg.is_empty() {
+                                        let remote_files = match self.git.fetch_remote_repository(
+                                            remote_pkg.as_str(),
+                                            remote_tag.as_str(),
+                                            &remote_files,
+                                        ) {
+                                            Ok(rf) => rf,
+                                            Err(err) => {
+                                                error!("error retrieving remote files: {}", err);
 
-        if let Yaml::Hash(include_root) = content {
-            for (_, root) in include_root {
-                if let Yaml::Array(includes) = root {
-                    for include in includes {
-                        if let Yaml::Hash(item) = include {
-                            let mut remote_pkg = String::new();
-                            let mut remote_tag = String::new();
-                            let mut remote_files: Vec<String> = vec![];
+                                                vec![]
+                                            }
+                                        };
 
-                            for (key, item_value) in item {
+                                        self.parse_remote_files(parse_results, &remote_files);
+                                    }
+
+                                    if let Yaml::String(key_str) = key {
+                                        match key_str.trim().to_lowercase().as_str() {
+                                            "local" => {
+                                                if let Yaml::String(value) = item_value {
+                                                    let current_uri =
+                                                        uri.join(value.as_str()).ok()?;
+                                                    let current_content =
+                                                        std::fs::read_to_string(current_uri.path())
+                                                            .ok()?;
+
+                                                    if follow {
+                                                        self.parse_contents_recursive(
+                                                            parse_results,
+                                                            &current_uri,
+                                                            &current_content,
+                                                            follow,
+                                                            iteration + 1,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            "remote" => {
+                                                if let Yaml::String(value) = item_value {
+                                                    let remote_url = match Url::parse(value) {
+                                                        Ok(f) => f,
+                                                        Err(err) => {
+                                                            error!("could not parse remote URL: {}; got err: {:?}", value, err);
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                    let file = match self
+                                                        .git
+                                                        .fetch_remote(remote_url.clone())
+                                                    {
+                                                        Ok(res) => res,
+                                                        Err(err) => {
+                                                            error!("error retrieving remote file: {}; got err: {:?}", remote_url, err);
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                    self.parse_remote_files(parse_results, &[file]);
+                                                }
+                                            }
+                                            "project" => {
+                                                if let Yaml::String(value) = item_value {
+                                                    remote_pkg = value.clone();
+                                                }
+                                            }
+                                            "ref" => {
+                                                if let Yaml::String(value) = item_value {
+                                                    remote_tag = value.clone();
+                                                }
+                                            }
+                                            "file" => {
+                                                debug!("files: {:?}", item_value);
+                                                if let Yaml::Array(value) = item_value {
+                                                    for yml in value {
+                                                        if let Yaml::String(p) = yml {
+                                                            remote_files.push(p.to_string());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => break,
+                                        }
+                                    }
+                                }
+
                                 if follow && !remote_pkg.is_empty() {
                                     let remote_files = match self.git.fetch_remote_repository(
                                         remote_pkg.as_str(),
@@ -293,91 +379,6 @@ impl Parser for ParserImpl {
 
                                     self.parse_remote_files(parse_results, &remote_files);
                                 }
-
-                                if let Yaml::String(key_str) = key {
-                                    match key_str.trim().to_lowercase().as_str() {
-                                        "local" => {
-                                            if let Yaml::String(value) = item_value {
-                                                let current_uri = uri.join(value.as_str()).ok()?;
-                                                let current_content =
-                                                    std::fs::read_to_string(current_uri.path())
-                                                        .ok()?;
-
-                                                if follow {
-                                                    self.parse_contents_recursive(
-                                                        parse_results,
-                                                        &current_uri,
-                                                        &current_content,
-                                                        follow,
-                                                        iteration + 1,
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        "remote" => {
-                                            if let Yaml::String(value) = item_value {
-                                                let remote_url = match Url::parse(value) {
-                                                    Ok(f) => f,
-                                                    Err(err) => {
-                                                        error!("could not parse remote URL: {}; got err: {:?}", value, err);
-                                                        continue;
-                                                    }
-                                                };
-
-                                                let file = match self
-                                                    .git
-                                                    .fetch_remote(remote_url.clone())
-                                                {
-                                                    Ok(res) => res,
-                                                    Err(err) => {
-                                                        error!("error retrieving remote file: {}; got err: {:?}", remote_url, err);
-                                                        continue;
-                                                    }
-                                                };
-
-                                                self.parse_remote_files(parse_results, &[file]);
-                                            }
-                                        }
-                                        "project" => {
-                                            if let Yaml::String(value) = item_value {
-                                                remote_pkg = value.clone();
-                                            }
-                                        }
-                                        "ref" => {
-                                            if let Yaml::String(value) = item_value {
-                                                remote_tag = value.clone();
-                                            }
-                                        }
-                                        "file" => {
-                                            debug!("files: {:?}", item_value);
-                                            if let Yaml::Array(value) = item_value {
-                                                for yml in value {
-                                                    if let Yaml::String(p) = yml {
-                                                        remote_files.push(p.to_string());
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                            }
-
-                            if follow && !remote_pkg.is_empty() {
-                                let remote_files = match self.git.fetch_remote_repository(
-                                    remote_pkg.as_str(),
-                                    remote_tag.as_str(),
-                                    &remote_files,
-                                ) {
-                                    Ok(rf) => rf,
-                                    Err(err) => {
-                                        error!("error retrieving remote files: {}", err);
-
-                                        vec![]
-                                    }
-                                };
-
-                                self.parse_remote_files(parse_results, &remote_files);
                             }
                         }
                     }

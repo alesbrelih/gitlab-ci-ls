@@ -602,6 +602,42 @@ impl LSPHandlers {
         let mut all_stages = self.stages.lock().unwrap();
         let mut all_variables = self.variables.lock().unwrap();
 
+        info!("importing files from base");
+        let base_uri = format!("{}base", self.cfg.cache_path);
+        let base_uri_path = Url::parse(format!("file://{base_uri}/").as_str())?;
+        for dir in std::fs::read_dir(&base_uri)?.flatten() {
+            let file_uri = base_uri_path.join(dir.file_name().to_str().unwrap())?;
+            let file_content = std::fs::read_to_string(dir.path())?;
+
+            if let Some(results) = self.parser.parse_contents(&file_uri, &file_content, false) {
+                for file in results.files {
+                    info!("found file: {:?}", &file);
+                    store.insert(file.path, file.content);
+                }
+
+                for node in results.nodes {
+                    info!("found node: {:?}", &node);
+                    let content = node.content.unwrap_or(String::new());
+
+                    all_nodes
+                        .entry(node.uri)
+                        .or_default()
+                        .insert(node.key, content);
+                }
+
+                for stage in results.stages {
+                    info!("found stage: {:?}", &stage);
+                    all_stages.insert(stage.key.clone(), stage);
+                }
+
+                for variable in results.variables {
+                    info!("found variable: {:?}", &variable);
+                    all_variables.insert(variable.key.clone(), variable);
+                }
+            }
+        }
+
+        info!("importing from root file");
         let mut uri = Url::parse(format!("file://{root_dir}/").as_str())?;
         info!("uri: {}", &uri);
 
