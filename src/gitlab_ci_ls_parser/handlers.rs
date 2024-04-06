@@ -205,6 +205,7 @@ impl LSPHandlers {
         let document_uri = params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&document_uri.to_string())?;
         let position = params.text_document_position_params.position;
+        let stages = self.stages.lock().unwrap();
 
         let mut locations: Vec<LSPLocation> = vec![];
 
@@ -247,6 +248,18 @@ impl LSPHandlers {
                             range: element.range,
                         });
                     }
+                }
+            }
+            parser::PositionType::Stage => {
+                let line = document.lines().nth(position.line as usize)?;
+                let word =
+                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
+
+                if let Some(el) = stages.get(word) {
+                    locations.push(LSPLocation {
+                        uri: el.uri.clone(),
+                        range: el.range.clone(),
+                    });
                 }
             }
             parser::PositionType::Variable => {
