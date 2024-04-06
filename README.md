@@ -161,7 +161,7 @@ This extension supports configuration which needs to be set up because _gitlab-c
 To use `gitlab-ci-ls` with Emacs `lsp-mode`, reference the below sample
 configuration.
 
-``` emacs-lisp
+```emacs-lisp
 (add-to-list 'lsp-language-id-configuration '("\\.gitlab-ci\\.yml$" . "gitlabci"))
 (add-to-list 'lsp-language-id-configuration '("/ci-templates/.*\\.yml$" . "gitlabci"))
 
@@ -182,3 +182,5 @@ configuration.
 - [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
 - [x] Fix VSCode completion. It seems it also needs a range to correctly update text.
 - [x] Rename to gitlab-ci-ls.
+- [ ] References for stages
+- [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
