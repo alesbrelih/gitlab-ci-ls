@@ -9,6 +9,7 @@ pub mod messages;
 pub mod parser;
 pub mod parser_utils;
 pub mod treesitter;
+pub mod treesitter_queries;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct LSPPosition {
