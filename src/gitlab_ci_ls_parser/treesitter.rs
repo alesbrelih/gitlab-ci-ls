@@ -472,15 +472,7 @@ impl Treesitter for TreesitterImpl {
             .set_language(tree_sitter_yaml::language())
             .expect("Error loading YAML grammar");
 
-        // 1. extends
-        // 2. stages
-        // 3. variables
-        // 4. root nodes
-        // 4. local includes
-        // 5. project includes
-        // 6. remote includes
-        let query_source = r#"
-
+        let search_extends = r#"
             (
                 block_mapping_pair
                 key: (flow_node) @keyextends
@@ -490,6 +482,9 @@ impl Treesitter for TreesitterImpl {
                 ]
                 (#eq? @keyextends "extends")
             )
+        "#;
+
+        let search_stages = r#"
             (
                 block_mapping_pair
                     key: (
@@ -504,6 +499,9 @@ impl Treesitter for TreesitterImpl {
                     )
                 (#eq? @keystage "stage")
             )
+        "#;
+
+        let search_variables = r#"
             (
                 block_mapping_pair
                 key: (
@@ -512,40 +510,88 @@ impl Treesitter for TreesitterImpl {
                     )
                 )
                 value:
-                [
-                    (
-                        block_node(
-                            block_mapping(block_mapping_pair
-                                value:
-                                    [
-                                        (flow_node(flow_sequence(flow_node(double_quote_scalar)) ))
-                                        (flow_node(double_quote_scalar))
-                                    ] @variable
-                            )
+                (
+                    block_node(
+                        block_mapping(block_mapping_pair
+                            value:
+                                [
+                                    (flow_node(flow_sequence(flow_node) ))
+                                    (flow_node)
+                                ] @variable
                         )
                     )
-                    (
-                        block_node(
-                            block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar)))) @variable
-                        )
-                    )
-                    (
-                        block_node(
-                            block_sequence(
-                                block_sequence_item(
-                                    block_node(
-                                        block_mapping(
-                                            block_mapping_pair
-                                            value: (flow_node(double_quote_scalar)) @variable
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                ]
-            (#any-of? @keyvariable "image" "before_script" "after_script" "script" "rules" "variables")
+                )
+                (#eq? @keyvariable "image")
             )
+            (
+                block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar)  @keyvariable
+                    )
+                )
+                value:
+                (
+                    block_node(
+                        block_mapping(block_mapping_pair
+                            value:
+                                [
+                                    (flow_node(flow_sequence(flow_node) ))
+                                    (flow_node)
+                                ] @variable
+                        )
+                    )
+                )
+                (#eq? @keyvariable "variables")
+            )
+            (
+                block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar)  @keyvariable
+                    )
+                )
+                value:
+                (
+                    block_node(
+                        block_sequence(block_sequence_item) @variable
+                    )
+                )
+                (#eq? @keyvariable "before_script")
+            )
+            (
+                block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar)  @keyvariable
+                    )
+                )
+                value:
+                (
+                    block_node(
+                        block_sequence(block_sequence_item) @variable
+                    )
+                )
+                (#eq? @keyvariable "script")
+            )
+            (
+                block_mapping_pair
+                key: (
+                    flow_node(
+                        plain_scalar(string_scalar)  @keyvariable
+                    )
+                )
+                value:
+                (
+                    block_node(
+                        block_sequence(block_sequence_item) @variable
+                    )
+                )
+                (#eq? @keyvariable "after_script")
+            )
+        "#;
+
+        let search_root_node = r"
             (
                 stream(
                     document(
@@ -558,6 +604,9 @@ impl Treesitter for TreesitterImpl {
                     )
                 )
             )
+        ";
+
+        let search_local_include = r#"
             (
                 stream(
                     document(
@@ -587,6 +636,9 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @local_include_key "include")
                 (#eq? @local_key "local")
             )
+        "#;
+
+        let search_project_includes = r#"
             (
                 stream(
                     document(
@@ -618,7 +670,7 @@ impl Treesitter for TreesitterImpl {
                                                             block_mapping(
                                                             block_mapping_pair
                                                                 key: (flow_node(plain_scalar(string_scalar)@file_key))
-                                                                value: (block_node(block_sequence(block_sequence_item(flow_node)@file)))
+                                                                value: (block_node(block_sequence(block_sequence_item(flow_node)@file_value)))
                                                             )
                                                         )
                                                     ]
@@ -635,6 +687,9 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @project_key "project")
                 (#eq? @file_key "file")
             )
+        "#;
+
+        let search_job_needs = r#"
             (
                 block_mapping_pair
                     key: (flow_node)@needs_key
@@ -656,6 +711,9 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @needs_key "needs")
                 (#eq? @needs_job_key "job")
             )
+        "#;
+
+        let search_remote_urls = r#"
             (
                 stream(
                     document(
@@ -686,16 +744,40 @@ impl Treesitter for TreesitterImpl {
                 (#eq? @remote_url_key "remote")
             )
         "#;
+
+        let query_source = format!(
+            r#"
+            {search_extends}
+            {search_stages}
+            {search_variables}
+            {search_root_node}
+            {search_local_include}
+            {search_project_includes}
+            {search_job_needs}
+            {search_remote_urls}
+        "#
+        );
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
-        let query = Query::new(language(), query_source).unwrap();
+        let query = Query::new(language(), query_source.as_str()).unwrap();
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut remote_include = RemoteInclude {
             ..Default::default()
         };
+
+        let extends_index = query.capture_index_for_name("extends").unwrap();
+        let stage_index = query.capture_index_for_name("stage").unwrap();
+        let variable_index = query.capture_index_for_name("variable").unwrap();
+        let root_node_index = query.capture_index_for_name("rootnode").unwrap();
+        let local_include_index = query.capture_index_for_name("local_value").unwrap();
+        let needs_index = query.capture_index_for_name("needs_job_value").unwrap();
+        let remote_url_index = query.capture_index_for_name("remote_url_value").unwrap();
+        let project_name_index = query.capture_index_for_name("project_value").unwrap();
+        let project_ref_index = query.capture_index_for_name("ref_value").unwrap();
+        let project_file_index = query.capture_index_for_name("file_value").unwrap();
 
         for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
@@ -704,7 +786,8 @@ impl Treesitter for TreesitterImpl {
             // together but there are multiple capture groups I need to iterate over
             // TODO: check treesitter if I can group to make this easier.. Perhaps some capture
             // group is wrong.
-            let remote_include_indexes: Vec<u32> = vec![10, 11, 12, 13, 14, 15, 16, 17];
+            let remote_include_indexes =
+                [project_name_index, project_ref_index, project_file_index];
             if mat
                 .captures
                 .iter()
@@ -724,14 +807,14 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     match c.index {
-                        12 => {
+                        idx if idx == project_name_index => {
                             remote_include.project = Some(content[c.node.byte_range()].to_string());
                         }
-                        14 => {
+                        idx if idx == project_ref_index => {
                             remote_include.reference =
                                 Some(content[c.node.byte_range()].to_string());
                         }
-                        16 => {
+                        idx if idx == project_file_index => {
                             if c.node.start_position().row == position.line as usize {
                                 remote_include.file =
                                     Some(content[c.node.byte_range()].to_string());
@@ -753,11 +836,11 @@ impl Treesitter for TreesitterImpl {
                         && c.node.end_position().row >= position.line as usize
                     {
                         match c.index {
-                            1 => return parser::PositionType::Extend,
-                            3 => return parser::PositionType::Stage,
-                            5 => return parser::PositionType::Variable,
-                            6 => return parser::PositionType::RootNode,
-                            9 => {
+                            idx if idx == extends_index => return parser::PositionType::Extend,
+                            idx if idx == stage_index => return parser::PositionType::Stage,
+                            idx if idx == variable_index => return parser::PositionType::Variable,
+                            idx if idx == root_node_index => return parser::PositionType::RootNode,
+                            idx if idx == local_include_index => {
                                 return parser::PositionType::Include(IncludeInformation {
                                     local: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
@@ -765,12 +848,12 @@ impl Treesitter for TreesitterImpl {
                                     ..Default::default()
                                 })
                             }
-                            20 => {
+                            idx if idx == needs_index => {
                                 return parser::PositionType::Needs(NodeDefinition {
                                     name: content[c.node.byte_range()].to_string(),
                                 })
                             }
-                            23 => {
+                            idx if idx == remote_url_index => {
                                 return parser::PositionType::Include(IncludeInformation {
                                     remote_url: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
