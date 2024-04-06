@@ -182,5 +182,5 @@ configuration.
 - [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
 - [x] Fix VSCode completion. It seems it also needs a range to correctly update text.
 - [x] Rename to gitlab-ci-ls.
-- [ ] References for stages
+- [x] References for stages
 - [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
