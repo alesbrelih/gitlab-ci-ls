@@ -14,7 +14,7 @@ pub trait Treesitter {
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
-    fn get_all_stages(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
+    fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_all_extends(
         &self,
         uri: String,
@@ -245,7 +245,7 @@ impl Treesitter for TreesitterImpl {
         stages
     }
 
-    fn get_all_stages(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
+    fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(tree_sitter_yaml::language())
@@ -254,7 +254,7 @@ impl Treesitter for TreesitterImpl {
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
-        let query = Query::new(language(), &TreesitterQueries::get_all_stages()).unwrap();
+        let query = Query::new(language(), &TreesitterQueries::get_all_stages(stage)).unwrap();
         let mut cursor_qry = QueryCursor::new();
         let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
@@ -885,7 +885,7 @@ job_two:
 
         let uri = "file://mocked";
         let treesitter = TreesitterImpl::new();
-        let all_stages = treesitter.get_all_stages(uri, cnt);
+        let all_stages = treesitter.get_all_stages(uri, cnt, None);
 
         assert_eq!(all_stages.len(), 2);
 

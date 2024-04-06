@@ -294,7 +294,7 @@ impl LSPHandlers {
 
                 locations.append(&mut root);
             }
-            _ => {
+            parser::PositionType::None => {
                 error!("invalid position type for goto def");
                 return None;
             }
@@ -761,9 +761,9 @@ impl LSPHandlers {
             }
         }
 
-        let stages = self
-            .parser
-            .get_all_stages(params.text_document.uri.as_str(), content.as_str());
+        let stages =
+            self.parser
+                .get_all_stages(params.text_document.uri.as_str(), content.as_str(), None);
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -869,6 +869,15 @@ impl LSPHandlers {
                         );
                         references.append(&mut extends);
                     }
+                }
+            }
+            parser::PositionType::Stage => {
+                let word =
+                    parser_utils::ParserUtils::extract_word(line, position.character as usize);
+
+                for (uri, content) in store.iter() {
+                    let mut stages = self.parser.get_all_stages(uri, content.as_str(), word);
+                    references.append(&mut stages);
                 }
             }
             _ => {}

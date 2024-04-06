@@ -99,8 +99,14 @@ impl TreesitterQueries {
         "#.to_string()
     }
 
-    pub fn get_all_stages() -> String {
-        r#"
+    pub fn get_all_stages(stage: Option<&str>) -> String {
+        let mut search = String::new();
+        if stage.is_some() {
+            search = format!("(#eq? @value \"{}\")", stage.unwrap());
+        }
+
+        format!(
+            r#"
         (
             block_mapping_pair
                 key: (
@@ -114,9 +120,10 @@ impl TreesitterQueries {
                     )
                 )
             (#eq? @key "stage")
+            {search}
         )
         "#
-        .to_string()
+        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -147,6 +154,16 @@ impl TreesitterQueries {
                         )
                     )
                 (#eq? @keystage "stage")
+            )
+            (
+                block_mapping_pair
+                    key: (
+                        flow_node(
+                            plain_scalar(string_scalar) @keystage
+                        )
+                    )
+                    value: (block_node(block_sequence(block_sequence_item)@stage ))
+                (#eq? @keystage "stages")
             )
         "#;
 
