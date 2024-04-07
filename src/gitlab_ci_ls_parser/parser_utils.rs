@@ -1,5 +1,3 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
-
 pub struct ParserUtils {}
 
 impl ParserUtils {
@@ -59,9 +57,7 @@ impl ParserUtils {
     }
 
     pub fn remote_path_to_hash(uri: &str) -> String {
-        let mut hasher = DefaultHasher::new();
-        uri.hash(&mut hasher);
-        hasher.finish().to_string()
+        crc64::crc64(0, uri.as_bytes()).to_string()
     }
 
     pub fn extract_variable(line: &str, char_index: usize) -> Option<&str> {
