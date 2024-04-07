@@ -63,8 +63,6 @@ impl Git for GitImpl {
 
                 return;
             }
-
-            return;
         }
 
         let remotes = match self.package_map.get(remote_pkg) {
