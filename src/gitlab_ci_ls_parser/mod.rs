@@ -73,6 +73,7 @@ pub enum LSPResult {
     Definition(DefinitionResult),
     Diagnostics(DiagnosticsResult),
     References(ReferencesResult),
+    Error(anyhow::Error),
 }
 
 #[derive(Debug, Clone)]

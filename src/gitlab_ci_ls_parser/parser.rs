@@ -1,12 +1,46 @@
 use std::collections::HashMap;
 
-use log::{debug, error};
+use anyhow::anyhow;
+use log::error;
 use lsp_types::{Position, Url};
-use yaml_rust::{Yaml, YamlLoader};
+use serde::{Deserialize, Serialize};
 
 use super::{
     git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults,
 };
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IncludeNode {
+    include: Vec<IncludeItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)] // This attribute allows for different structs in the same Vec
+enum IncludeItem {
+    Project(Project),
+    Local(Local),
+    Remote(Remote),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::struct_field_names)]
+struct Project {
+    project: String,
+
+    #[serde(rename = "ref")]
+    reference: String,
+    file: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Local {
+    local: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Remote {
+    remote: String,
+}
 
 pub trait Parser {
     fn get_all_extends(
@@ -44,7 +78,7 @@ pub trait Parser {
         &self,
         element: GitlabElement,
         store: &HashMap<String, String>,
-    ) -> Option<String>;
+    ) -> anyhow::Result<String>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -264,123 +298,74 @@ impl Parser for ParserImpl {
             .treesitter
             .get_root_node(uri.as_str(), content, "include")
         {
-            let documents = YamlLoader::load_from_str(element.content?.as_str()).ok()?;
-            let content = &documents[0];
-            if let Yaml::Hash(include_root) = content {
-                for (_, root) in include_root {
-                    if let Yaml::Array(includes) = root {
-                        for include in includes {
-                            if let Yaml::Hash(item) = include {
-                                let mut remote_pkg = String::new();
-                                let mut remote_tag = String::new();
-                                let mut remote_files: Vec<String> = vec![];
+            let include_node: IncludeNode = match serde_yaml::from_str(&element.content.clone()?) {
+                Ok(y) => y,
+                Err(err) => {
+                    error!(
+                        "error parsing yaml: {}, got err: {}",
+                        &element.content?, err
+                    );
 
-                                for (key, item_value) in item {
-                                    if follow && !remote_pkg.is_empty() {
-                                        let remote_files = match self.git.fetch_remote_repository(
-                                            remote_pkg.as_str(),
-                                            remote_tag.as_str(),
-                                            &remote_files,
-                                        ) {
-                                            Ok(rf) => rf,
-                                            Err(err) => {
-                                                error!("error retrieving remote files: {}", err);
+                    return None;
+                }
+            };
 
-                                                vec![]
-                                            }
-                                        };
+            for include_node in include_node.include {
+                match include_node {
+                    IncludeItem::Local(node) => {
+                        let current_uri = uri.join(node.local.as_str()).ok()?;
+                        let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
 
-                                        self.parse_remote_files(parse_results, &remote_files);
-                                    }
-
-                                    if let Yaml::String(key_str) = key {
-                                        match key_str.trim().to_lowercase().as_str() {
-                                            "local" => {
-                                                if let Yaml::String(value) = item_value {
-                                                    let current_uri =
-                                                        uri.join(value.as_str()).ok()?;
-                                                    let current_content =
-                                                        std::fs::read_to_string(current_uri.path())
-                                                            .ok()?;
-
-                                                    if follow {
-                                                        self.parse_contents_recursive(
-                                                            parse_results,
-                                                            &current_uri,
-                                                            &current_content,
-                                                            follow,
-                                                            iteration + 1,
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            "remote" => {
-                                                if let Yaml::String(value) = item_value {
-                                                    let remote_url = match Url::parse(value) {
-                                                        Ok(f) => f,
-                                                        Err(err) => {
-                                                            error!("could not parse remote URL: {}; got err: {:?}", value, err);
-                                                            continue;
-                                                        }
-                                                    };
-
-                                                    let file = match self
-                                                        .git
-                                                        .fetch_remote(remote_url.clone())
-                                                    {
-                                                        Ok(res) => res,
-                                                        Err(err) => {
-                                                            error!("error retrieving remote file: {}; got err: {:?}", remote_url, err);
-                                                            continue;
-                                                        }
-                                                    };
-
-                                                    self.parse_remote_files(parse_results, &[file]);
-                                                }
-                                            }
-                                            "project" => {
-                                                if let Yaml::String(value) = item_value {
-                                                    remote_pkg = value.clone();
-                                                }
-                                            }
-                                            "ref" => {
-                                                if let Yaml::String(value) = item_value {
-                                                    remote_tag = value.clone();
-                                                }
-                                            }
-                                            "file" => {
-                                                debug!("files: {:?}", item_value);
-                                                if let Yaml::Array(value) = item_value {
-                                                    for yml in value {
-                                                        if let Yaml::String(p) = yml {
-                                                            remote_files.push(p.to_string());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            _ => break,
-                                        }
-                                    }
-                                }
-
-                                if follow && !remote_pkg.is_empty() {
-                                    let remote_files = match self.git.fetch_remote_repository(
-                                        remote_pkg.as_str(),
-                                        remote_tag.as_str(),
-                                        &remote_files,
-                                    ) {
-                                        Ok(rf) => rf,
-                                        Err(err) => {
-                                            error!("error retrieving remote files: {}", err);
-
-                                            vec![]
-                                        }
-                                    };
-
-                                    self.parse_remote_files(parse_results, &remote_files);
-                                }
-                            }
+                        if follow {
+                            self.parse_contents_recursive(
+                                parse_results,
+                                &current_uri,
+                                &current_content,
+                                follow,
+                                iteration + 1,
+                            );
                         }
+                    }
+                    IncludeItem::Remote(node) => {
+                        let remote_url = match Url::parse(&node.remote) {
+                            Ok(f) => f,
+                            Err(err) => {
+                                error!(
+                                    "could not parse remote URL: {}; got err: {:?}",
+                                    node.remote, err
+                                );
+                                continue;
+                            }
+                        };
+
+                        let file = match self.git.fetch_remote(remote_url.clone()) {
+                            Ok(res) => res,
+                            Err(err) => {
+                                error!(
+                                    "error retrieving remote file: {}; got err: {:?}",
+                                    remote_url, err
+                                );
+                                continue;
+                            }
+                        };
+
+                        self.parse_remote_files(parse_results, &[file]);
+                    }
+                    IncludeItem::Project(node) => {
+                        let remote_files = match self.git.fetch_remote_repository(
+                            node.project.as_str(),
+                            node.reference.as_str(),
+                            node.file,
+                        ) {
+                            Ok(rf) => rf,
+                            Err(err) => {
+                                error!("error retrieving remote files: {}", err);
+
+                                vec![]
+                            }
+                        };
+
+                        self.parse_remote_files(parse_results, &remote_files);
                     }
                 }
             }
@@ -431,40 +416,34 @@ impl Parser for ParserImpl {
         &self,
         element: GitlabElement,
         store: &HashMap<String, String>,
-    ) -> Option<String> {
+    ) -> anyhow::Result<String> {
         let mut all_nodes = vec![];
 
         self.all_nodes(store, &mut all_nodes, element.clone(), 0);
 
-        let root_node = all_nodes[0].clone();
-        let cnt = root_node
-            .content?
-            .clone()
-            .lines()
-            .skip(1)
-            .collect::<Vec<&str>>()
-            .join("\n");
+        let init = serde_yaml::from_str("")
+            .map_err(|e| anyhow!("error initializing empty yaml node; got err: {e}"))?;
 
-        let mut merged: serde_yaml::Value = serde_yaml::from_str(cnt.as_str()).ok()?;
+        let merged = all_nodes
+            .iter()
+            .filter_map(|n| n.content.clone())
+            .map(|c| c.lines().skip(1).collect::<Vec<&str>>().join("\n"))
+            .fold(init, |acc, x| {
+                let current = serde_yaml::from_str(x.as_str());
 
-        for node in all_nodes {
-            let cnt = node
-                .content?
-                .lines()
-                .skip(1)
-                .collect::<Vec<&str>>()
-                .join("\n");
-
-            let current: serde_yaml::Value = serde_yaml::from_str(cnt.as_str()).ok()?;
-
-            merged = ParserImpl::merge_yaml_nodes(&merged, &current);
-        }
+                if let Ok(curr) = current {
+                    ParserImpl::merge_yaml_nodes(&acc, &curr)
+                } else {
+                    acc
+                }
+            });
 
         let mut top_level_map = serde_yaml::Mapping::new();
         top_level_map.insert(serde_yaml::Value::String(element.key), merged);
 
         let merged_with_key = serde_yaml::Value::Mapping(top_level_map);
 
-        serde_yaml::to_string(&merged_with_key).ok()
+        serde_yaml::to_string(&merged_with_key)
+            .map_err(|e| anyhow!("error serializing node; got err: {e}"))
     }
 }

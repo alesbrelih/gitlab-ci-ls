@@ -17,7 +17,7 @@ pub trait Git {
         &self,
         remote_pkg: &str,
         remote_tag: &str,
-        remote_files: &[String],
+        remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>>;
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
 }
@@ -108,7 +108,7 @@ impl Git for GitImpl {
         &self,
         remote_pkg: &str,
         remote_tag: &str,
-        remote_files: &[String],
+        remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>> {
         if remote_tag.is_empty() || remote_pkg.is_empty() || remote_files.is_empty() {
             return Ok(vec![]);

@@ -104,14 +104,22 @@ fn handle_result(msg: &Message, result: Option<LSPResult>) -> Option<Message> {
             info!("send definition msg: {:?}", diagnostics_result);
             Some(diagnostics(diagnostics_result))
         }
-        None => match msg {
-            Message::Request(req) => Some(Message::Response(Response {
-                id: req.clone().id,
-                result: Some(serde_json::Value::Null),
-                error: None,
-            })),
-            _ => None,
-        },
+        Some(LSPResult::Error(err)) => {
+            error!("error handling message: {:?} got error: {:?}", msg, err);
+            null_response(msg)
+        }
+        None => null_response(msg),
+    }
+}
+
+fn null_response(msg: &Message) -> Option<Message> {
+    match msg {
+        Message::Request(req) => Some(Message::Response(Response {
+            id: req.clone().id,
+            result: Some(serde_json::Value::Null),
+            error: None,
+        })),
+        _ => None,
     }
 }
 

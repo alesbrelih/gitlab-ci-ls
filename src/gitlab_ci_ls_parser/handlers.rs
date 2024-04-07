@@ -76,7 +76,7 @@ impl LSPHandlers {
                 for (document_uri, node) in nodes.iter() {
                     for (key, content) in node {
                         if key.eq(word) {
-                            let cnt = self.parser.get_full_definition(
+                            let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
                                     content: Some(content.to_string()),
@@ -84,7 +84,10 @@ impl LSPHandlers {
                                     ..Default::default()
                                 },
                                 &store,
-                            )?;
+                            ) {
+                                Ok(c) => c,
+                                Err(err) => return Some(LSPResult::Error(err)),
+                            };
 
                             return Some(LSPResult::Hover(HoverResult {
                                 id: request.id,
