@@ -56,6 +56,7 @@ fn default_cache_path() -> String {
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
@@ -134,17 +135,43 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         LevelFilter::Warn,
     )?;
 
-    let repo = Repository::open(&init_params.root_path)?;
-    let remote_urls: Vec<String> = repo
-        .remotes()?
-        .iter()
-        .flatten()
-        .flat_map(|r_name| repo.find_remote(r_name))
-        .filter_map(|remote| remote.url().map(std::string::ToString::to_string))
-        .filter_map(|remote| get_remote_hosts(remote.as_str()))
-        .collect();
+    let repository: Option<git2::Repository> = match Repository::open(&init_params.root_path) {
+        Ok(repo) => Some(repo),
+        Err(err) => {
+            error!(
+                "could not open repository: {}; got err: {}",
+                &init_params.root_path, err
+            );
 
-    save_base_files(&init_params)?;
+            None
+        }
+    };
+
+    let mut remote_urls = vec![];
+    if let Some(repo) = repository {
+        let remotes = match repo.remotes() {
+            Ok(r) => Some(r),
+            Err(err) => {
+                error!("could not list remotes; got err: {}", err);
+
+                None
+            }
+        };
+
+        if let Some(remotes) = remotes {
+            remote_urls = remotes
+                .iter()
+                .flatten()
+                .flat_map(|r_name| repo.find_remote(r_name))
+                .filter_map(|remote| remote.url().map(std::string::ToString::to_string))
+                .filter_map(|remote| get_remote_hosts(remote.as_str()))
+                .collect();
+        }
+    }
+
+    if let Err(err) = save_base_files(&init_params) {
+        error!("error saving base files; got err: {err}");
+    }
 
     let lsp_events =
         gitlab_ci_ls_parser::handlers::LSPHandlers::new(gitlab_ci_ls_parser::LSPConfig {
