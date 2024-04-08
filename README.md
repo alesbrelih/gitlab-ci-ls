@@ -1,101 +1,39 @@
-# Gitlab CI language server
+# GitLab CI Language Server (gitlab-ci-ls)
 
-## **This is not an official language server.**
+<p align="center" width="100%">
+    <img src="./docs/images/gitlab-ci-ls.png">
+</p>
 
-I've developed this LS to help myself working with Gitlab CI files.
+## Disclaimer
 
-## Functionalities
+This is an independent project and not an official GitLab product.
+It is intended to be used alongside `yaml-language-server` (yamlls), providing specialized support for GitLab CI files without replacing yamlls.
 
-Currently it supports only:
+## Features
 
-- _textDocument/definition_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition)
-- _textDocument/hover_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
-- _textDocument/completion_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
-- _textDocument/diagnostic_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_diagnostic)
-- _textDocument/references_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_reference)
+- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables` and `needs`.
+- **Find References**: Find all usages of `jobs` and `extends`.
+- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, and `variables`.
+- **Hover Information**: View documentation for job with merged definitions.
+- **Diagnostics**: Identifies issues with `extends` references and `stage` definitions.
 
-### Go To Definition
+It also supports jump to included files. In case it is a remote file it tries to downloading using
+current workspace git setup and caches it locally.
 
-Both extend and main node keys support go to definition.
-Supports:
+## Configuration
 
-- node definitions
-- job extends
-- job needs
+Initialization options:
 
-```yaml
-.base-job:
-  something: ...
+- **cache**: location for cached remote files
+- **log_path**: location for LS log
 
-myjob:
-  extends: .base-job
-```
+## Installation
 
-In the case above go to definition is supported for _.base-job_ and _myjob_ (if this is just an override of existing job).
+1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com).
+2. **Homebrew (macOS)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
+3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
 
-For remote file includes it tries to download referenced git repository and
-then use its files to jump to definition.
-
-To clone the repository it currently only supports ssh protocol and it
-automatically tries to use SSH key in SSH agent.
-
-It will try to find the correct remote by reading current working directory remote.
-In case there are multiple remotes (in cases such as forks) it is best to set the remote using the package_map option.
-
-For example:
-
-```
-{
-  ... other configuration,
-  package_map: {
-    "mytemplaterepository": "git@gitlab.com"
-  }
-}
-```
-
-in case where we are including gitlab files from a remote. For example:
-
-```yaml
-include:
-  - project: mytemplaterepository
-    ref: 1.0.0
-    file:
-      - "/.ci-template.yml"
-```
-
-Otherwise it will clone from the first remote it has access to which
-doesn't guarantee that this is the file version you want.
-
-### Autocomplete
-
-It supports autocompletion for:
-
-- extends
-- stages
-- job needs
-- variables (currently only root variables, per job definition will be added later on)
-
-### Diagnostic
-
-It shows diagnostics on:
-
-- invalid extends
-- invalid stages
-
-### References
-
-It shows references for:
-
-- node keys
-- extends
-
-## Installing
-
-1. Download release and optionally symlink it.
-2. On mac you can use `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`.
-3. Using cargo `cargo install gitlab-ci-ls`
-
-## Build
+## Build from source
 
 ```sh
 cargo build --release
@@ -105,8 +43,7 @@ Executable can then be found at _target/release/gitlab-ci-ls_
 
 ## Integration with Neovim
 
-Currently this tool isn't available on Mason but if there will be
-interest I will be add it.
+Currently this tool isn't available on [yet](https://github.com/mason-org/mason-registry/pull/5256).
 
 If you want to include it to test it you can use:
 
@@ -150,9 +87,11 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ## Integration with VSCode
 
-Extenstion can be seen [here](https://marketplace.visualstudio.com/items?itemName=alesbrelih.gitlab-ci-ls).
+Extension can be found [here](https://marketplace.visualstudio.com/items?itemName=alesbrelih.gitlab-ci-ls).
 
-This extension supports configuration which needs to be set up because _gitlab-ci-ls_ itself isn't installed along with the extension but it needs to be downloaded from releases, brew or built from source.
+This extension supports configuration which needs to be set up because _gitlab-ci-ls_
+itself isn't installed along with the extension but it needs to be downloaded from
+releases, brew or built from source.
 
 ![vscode settings](./docs/images/vscode-settings.jpg)
 
