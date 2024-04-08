@@ -43,7 +43,7 @@ Executable can then be found at _target/release/gitlab-ci-ls_
 
 ## Integration with Neovim
 
-Currently this tool isn't available on [yet](https://github.com/mason-org/mason-registry/pull/5256).
+Currently this tool isn't available on Mason [yet](https://github.com/mason-org/mason-registry/pull/5256).
 
 If you want to include it to test it you can use:
 
