@@ -384,6 +384,7 @@ impl Treesitter for TreesitterImpl {
         let project_name_index = query.capture_index_for_name("project_value").unwrap();
         let project_ref_index = query.capture_index_for_name("ref_value").unwrap();
         let project_file_index = query.capture_index_for_name("file_value").unwrap();
+        let basic_include_index = query.capture_index_for_name("basic_include_value").unwrap();
 
         for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
@@ -462,6 +463,14 @@ impl Treesitter for TreesitterImpl {
                             idx if idx == remote_url_index => {
                                 return parser::PositionType::Include(IncludeInformation {
                                     remote_url: Some(Include {
+                                        path: content[c.node.byte_range()].to_string(),
+                                    }),
+                                    ..Default::default()
+                                })
+                            }
+                            idx if idx == basic_include_index => {
+                                return parser::PositionType::Include(IncludeInformation {
+                                    basic: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
                                     ..Default::default()
@@ -1357,6 +1366,7 @@ job_one:
                     }),
                 local: None,
                 remote_url: None,
+                basic: None,
             }) => {
                 assert_eq!(want_project, project);
                 assert_eq!(want_reference, reference);
@@ -1403,6 +1413,7 @@ job_one:
                 remote: None,
                 local: Some(Include { path }),
                 remote_url: None,
+                basic: None,
             }) => {
                 assert_eq!(want_path, path);
             }
@@ -1447,6 +1458,7 @@ job_one:
                 remote: None,
                 local: None,
                 remote_url: Some(Include { path }),
+                basic: None,
             }) => {
                 assert_eq!(want_path, path);
             }

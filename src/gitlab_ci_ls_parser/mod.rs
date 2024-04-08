@@ -128,6 +128,7 @@ pub struct IncludeInformation {
     pub remote: Option<RemoteInclude>,
     pub remote_url: Option<Include>,
     pub local: Option<Include>,
+    pub basic: Option<Include>,
 }
 
 #[derive(Debug)]

@@ -347,6 +347,31 @@ impl TreesitterQueries {
             )
         "#;
 
+        let search_basic_include = r#"
+            (
+                stream(
+                    document(
+                        block_node(
+                            block_mapping(
+                                block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@basic_include_key))
+                                    value: (
+                                        block_node(
+                                            block_sequence(
+                                                block_sequence_item(
+                                                flow_node
+                                                ) @basic_include_value
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                (#eq? @local_include_key "include")
+            )
+        "#;
+
         let search_project_includes = r#"
             (
                 stream(
@@ -464,6 +489,7 @@ impl TreesitterQueries {
             {search_project_includes}
             {search_job_needs}
             {search_remote_urls}
+            {search_basic_include}
         "#
         )
     }

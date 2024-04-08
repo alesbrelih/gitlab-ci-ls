@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use log::error;
+use log::{error, info};
 use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,7 @@ enum IncludeItem {
     Project(Project),
     Local(Local),
     Remote(Remote),
+    Basic(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,6 +220,55 @@ impl ParserImpl {
             );
         }
     }
+
+    fn parse_remote_file(&self, remote_url: &str, parse_results: &mut ParseResults) {
+        let remote_url = match Url::parse(remote_url) {
+            Ok(f) => f,
+            Err(err) => {
+                error!(
+                    "could not parse remote URL: {}; got err: {:?}",
+                    remote_url, err
+                );
+
+                return;
+            }
+        };
+        let file = match self.git.fetch_remote(remote_url.clone()) {
+            Ok(res) => res,
+            Err(err) => {
+                error!(
+                    "error retrieving remote file: {}; got err: {:?}",
+                    remote_url, err
+                );
+
+                return;
+            }
+        };
+
+        self.parse_remote_files(parse_results, &[file]);
+    }
+
+    fn parse_local_file(
+        &self,
+        uri: &Url,
+        local_url: &str,
+        follow: bool,
+        parse_results: &mut ParseResults,
+        iteration: i32,
+    ) -> Option<()> {
+        let current_uri = uri.join(local_url).ok()?;
+        let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
+        if follow {
+            self.parse_contents_recursive(
+                parse_results,
+                &current_uri,
+                &current_content,
+                follow,
+                iteration + 1,
+            );
+        };
+        Some(())
+    }
 }
 
 impl Parser for ParserImpl {
@@ -313,43 +363,25 @@ impl Parser for ParserImpl {
             for include_node in include_node.include {
                 match include_node {
                     IncludeItem::Local(node) => {
-                        let current_uri = uri.join(node.local.as_str()).ok()?;
-                        let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
-
-                        if follow {
-                            self.parse_contents_recursive(
-                                parse_results,
-                                &current_uri,
-                                &current_content,
-                                follow,
-                                iteration + 1,
-                            );
-                        }
+                        self.parse_local_file(uri, &node.local, follow, parse_results, iteration)?;
                     }
                     IncludeItem::Remote(node) => {
-                        let remote_url = match Url::parse(&node.remote) {
-                            Ok(f) => f,
-                            Err(err) => {
-                                error!(
-                                    "could not parse remote URL: {}; got err: {:?}",
-                                    node.remote, err
-                                );
-                                continue;
-                            }
-                        };
-
-                        let file = match self.git.fetch_remote(remote_url.clone()) {
-                            Ok(res) => res,
-                            Err(err) => {
-                                error!(
-                                    "error retrieving remote file: {}; got err: {:?}",
-                                    remote_url, err
-                                );
-                                continue;
-                            }
-                        };
-
-                        self.parse_remote_files(parse_results, &[file]);
+                        self.parse_remote_file(&node.remote, parse_results);
+                    }
+                    IncludeItem::Basic(include_url) => {
+                        if let Ok(url) = Url::parse(&include_url) {
+                            info!("got remote URL: {url}");
+                            self.parse_remote_file(url.as_str(), parse_results);
+                        } else {
+                            info!("got local URL: {include_url}");
+                            self.parse_local_file(
+                                uri,
+                                &include_url,
+                                follow,
+                                parse_results,
+                                iteration,
+                            )?;
+                        }
                     }
                     IncludeItem::Project(node) => {
                         let remote_files = match self.git.fetch_remote_repository(

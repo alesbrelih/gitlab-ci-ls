@@ -318,31 +318,17 @@ impl LSPHandlers {
                 local: Some(local),
                 remote: None,
                 remote_url: None,
+                basic: None,
             } => {
-                let local =
-                    parser_utils::ParserUtils::strip_quotes(&local.path).trim_start_matches('.');
+                let local = parser_utils::ParserUtils::strip_quotes(&local.path);
 
-                store
-                    .keys()
-                    .find(|uri| uri.ends_with(local))
-                    .map(|uri| LSPLocation {
-                        uri: uri.clone(),
-                        range: Range {
-                            start: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                        },
-                    })
+                LSPHandlers::on_definition_local(local, store)
             }
             IncludeInformation {
                 local: None,
                 remote: Some(remote),
                 remote_url: None,
+                basic: None,
             } => {
                 let file = remote.file?;
                 let file = parser_utils::ParserUtils::strip_quotes(&file).trim_start_matches('/');
@@ -370,30 +356,74 @@ impl LSPHandlers {
                 local: None,
                 remote: None,
                 remote_url: Some(remote_url),
+                basic: None,
             } => {
-                let path_hash = parser_utils::ParserUtils::remote_path_to_hash(
-                    parser_utils::ParserUtils::strip_quotes(remote_url.path.as_str()),
-                );
-
-                store
-                    .keys()
-                    .find(|uri| uri.ends_with(format!("_{path_hash}.yaml").as_str()))
-                    .map(|uri| LSPLocation {
-                        uri: uri.clone(),
-                        range: Range {
-                            start: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                        },
-                    })
+                let remote_url = parser_utils::ParserUtils::strip_quotes(remote_url.path.as_str());
+                LSPHandlers::on_definition_remote(remote_url, store)
+            }
+            IncludeInformation {
+                local: None,
+                remote: None,
+                remote_url: None,
+                basic: Some(basic_url),
+            } => {
+                let url = parser_utils::ParserUtils::strip_quotes(&basic_url.path);
+                if let Ok(url) = Url::parse(url) {
+                    LSPHandlers::on_definition_remote(url.as_str(), store)
+                } else {
+                    LSPHandlers::on_definition_local(url, store)
+                }
             }
             _ => None,
         }
+    }
+
+    pub fn on_definition_local(
+        local_url: &str,
+        store: &HashMap<String, String>,
+    ) -> Option<LSPLocation> {
+        let local_url = local_url.trim_start_matches('.');
+
+        store
+            .keys()
+            .find(|uri| uri.ends_with(local_url))
+            .map(|uri| LSPLocation {
+                uri: uri.clone(),
+                range: Range {
+                    start: LSPPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LSPPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                },
+            })
+    }
+
+    pub fn on_definition_remote(
+        remote_url: &str,
+        store: &HashMap<String, String>,
+    ) -> Option<LSPLocation> {
+        let path_hash = parser_utils::ParserUtils::remote_path_to_hash(remote_url);
+
+        store
+            .keys()
+            .find(|uri| uri.ends_with(format!("_{path_hash}.yaml").as_str()))
+            .map(|uri| LSPLocation {
+                uri: uri.clone(),
+                range: Range {
+                    start: LSPPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LSPPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                },
+            })
     }
 
     pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
