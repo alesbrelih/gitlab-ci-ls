@@ -45,45 +45,7 @@ Executable can then be found at _target/release/gitlab-ci-ls_
 
 Currently this tool isn't available on Mason [yet](https://github.com/mason-org/mason-registry/pull/5256).
 
-If you want to include it to test it you can use:
-
-```lua
-local client = nil
-
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "yaml",
-  callback = function(_)
-    local root_dir = vim.fs.find(".git", { upward = true, path = vim.fn.expand("%:p:h") })[1]
-    vim.notify(root_dir)
-    if root_dir then
-      root_dir = vim.fn.fnamemodify(root_dir, ":h")
-      vim.notify(root_dir)
-    else
-      root_dir = vim.fn.expand("%:p:h")
-    end
-
-    if not client then
-      client = vim.lsp.start_client({
-        name = "gitlab-ci-ls",
-        cmd = { "/path-to-gitlab-ci-ls" },
-        init_options = {
-          cache = "/path/where/remote/folders/will/be/cached",
-          log_path = "/tmp/gitlab-ci-ls.log",
-        },
-        root_dir = root_dir,
-        on_attach = require("lazyvim.plugins.lsp.keymaps").on_attach,
-      })
-
-      if not client then
-        vim.notify("error creating LSP config")
-        return
-      end
-    end
-
-    vim.lsp.buf_attach_client(0, client)
-  end,
-})
-```
+But you can still use `nvim-lspconfig` to use it. More can be read [here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#gitlab_ci_ls).
 
 ## Integration with VSCode
 
