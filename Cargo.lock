@@ -305,7 +305,7 @@ dependencies = [
  "simple-logging",
  "simple_logger",
  "tokio",
- "tree-sitter 0.20.10",
+ "tree-sitter",
  "tree-sitter-yaml",
 ]
 
@@ -1242,16 +1242,6 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.20.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e747b1f9b7b931ed39a548c1fae149101497de3c1fc8d9e18c62c1a66c683d3d"
-dependencies = [
- "cc",
- "regex",
-]
-
-[[package]]
-name = "tree-sitter"
 version = "0.22.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "688200d842c76dd88f9a7719ecb0483f79f5a766fb1c100756d5d8a059abc71b"
@@ -1267,7 +1257,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c617b5ad28e66af17f9444e32cf0f0a04d0359bae8204a0924e0e05043820df7"
 dependencies = [
  "cc",
- "tree-sitter 0.22.5",
+ "tree-sitter",
 ]
 
 [[package]]
