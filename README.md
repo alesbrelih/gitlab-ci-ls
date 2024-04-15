@@ -47,6 +47,20 @@ Currently this tool isn't available on Mason [yet](https://github.com/mason-org/
 
 But you can still use `nvim-lspconfig` to use it. More can be read [here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#gitlab_ci_ls).
 
+**Important**: To use it now you will have to set correct file type. Before it was attached on
+`yaml` file types, but I have decided that it brings too much confusion.
+
+Example how to add it:
+
+```lua
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+  pattern = ".gitlab*",
+  callback = function()
+    vim.bo.filetype = "yaml.gitlab"
+  end,
+})
+```
+
 ## Integration with VSCode
 
 Extension can be found [here](https://marketplace.visualstudio.com/items?itemName=alesbrelih.gitlab-ci-ls).
@@ -85,3 +99,5 @@ configuration.
 - [x] Rename to gitlab-ci-ls.
 - [x] References for stages
 - [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
+- [ ] Support !reference
+- [ ] Handle default keyword
