@@ -3,7 +3,7 @@
   "description": "Gitlab CI Language Server",
   "author": "Ales Brelih",
   "license": "MIT",
-  "version": "0.5.0",
+  "version": "0.7.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/alesbrelih/gitlab-ci-ls"
@@ -13,6 +13,7 @@
   "keywords": [
     "gitlab language server"
   ],
+  "icon": "./gitlab-ci-ls.png",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -32,7 +33,7 @@
         },
         "gitlabLs.cachePath": {
           "type": "string",
-          "default": "~/.gitlab-ci-ls/cache/",
+          "default": "~/.cache/gitlab-ci-ls",
           "description": "Cache path for remote includes."
         },
         "gitlabLs.packageMap": {
@@ -42,7 +43,7 @@
         },
         "gitlabLs.logPath": {
           "type": "string",
-          "default": "/tmp/gitlab-ci-ls.log",
+          "default": "~/.cache/gitlab-ci-ls/log/gitlab-ci-ls.log",
           "description": "Log path for the LS."
         }
       }

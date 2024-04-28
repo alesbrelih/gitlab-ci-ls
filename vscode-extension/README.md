@@ -1,80 +1,103 @@
-# Gitlab CI language server
+# GitLab CI Language Server (gitlab-ci-ls)
 
-## **This is not an official language server.**
+<p align="center" width="100%">
+    <img src="https://github.com/alesbrelih/gitlab-ci-ls/blob/main/docs/images/gitlab-ci-ls.png">
+</p>
 
-I've developed this LS to help myself working with Gitlab CI files.
+## Disclaimer
+
+This is an independent project and not an official GitLab product.
+It is intended to be used alongside `yaml-language-server` (yamlls), providing specialized support for GitLab CI files without replacing yamlls.
+
+## Features
+
+- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables` and `needs`.
+- **Find References**: Find all usages of `jobs` and `extends`.
+- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, and `variables`.
+- **Hover Information**: View documentation for job with merged definitions.
+- **Diagnostics**: Identifies issues with `extends` references and `stage` definitions.
+
+It also supports jump to included files. In case it is a remote file it tries to downloading using
+current workspace git setup and caches it locally.
+
+## Configuration
+
+Initialization options:
+
+- **cache**: location for cached remote files
+- **log_path**: location for LS log
 
 ## Installation
 
-**Important:** You will need gitlab-ci-ls installed. You can see the installation options [here](https://github.com/alesbrelih/gitlab-ci-ls).
+1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com).
+2. **Homebrew (macOS)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
+3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
 
-## Functionalities
+## Build from source
 
-Currently it supports only:
-
-- _textDocument/definition_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition)
-- _textDocument/hover_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
-- _textDocument/completion_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
-- _textDocument/diagnostic_: [Link](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_diagnostic)
-
-### Go To Definition
-
-Both extend and main node keys support go to definition.
-
-```yaml
-.base-job:
-  something: ...
-
-myjob:
-  extends: .base-job
+```sh
+cargo build --release
 ```
 
-In the case above go to definition is supported for _.base-job_ and _myjob_ (if this is just an override of existing job).
+Executable can then be found at _target/release/gitlab-ci-ls_
 
-For remote file includes it tries to download referenced git repository and
-then use its files to jump to definition.
+## Integration with Neovim
 
-To clone the repository it currently only supports ssh protocol and it
-automatically tries to use SSH key in SSH agent.
+Currently this tool isn't available on Mason [yet](https://github.com/mason-org/mason-registry/pull/5256).
 
-It will try to find the correct remote by reading current working directory remote.
-In case there are multiple remotes (in cases such as forks) it is best to set the remote using the package_map option.
+But you can still use `nvim-lspconfig` to use it. More can be read [here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#gitlab_ci_ls).
 
-For example:
+**Important**: To use it now you will have to set correct file type. Before it was attached on
+`yaml` file types, but I have decided that it brings too much confusion.
 
-```
-{
-  ... other configuration,
-  package_map: {
-    "mytemplaterepository": "git@gitlab.com"
-  }
-}
-```
+Example how to add it:
 
-in case where we are including gitlab files from a remote. For example:
-
-```yaml
-include:
-  - project: mytemplaterepository
-    ref: 1.0.0
-    file:
-      - "/.ci-template.yml"
+```lua
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+  pattern = ".gitlab*",
+  callback = function()
+    vim.bo.filetype = "yaml.gitlab"
+  end,
+})
 ```
 
-Otherwise it will clone from the first remote it has access to which
-doesn't guarantee that this is the file version you want.
+## Integration with VSCode
 
-### Autocomplete
+Extension can be found [here](https://marketplace.visualstudio.com/items?itemName=alesbrelih.gitlab-ci-ls).
 
-It supports autocompletion for:
+This extension supports configuration which needs to be set up because _gitlab-ci-ls_
+itself isn't installed along with the extension but it needs to be downloaded from
+releases, brew or built from source.
 
-- extends
-- stages
-- variables (currently only root variables, per job definition will be added later on)
+![vscode settings](./docs/images/vscode-settings.jpg)
 
-### Diagnostic
+## Emacs lsp-mode configuration
 
-It shows diagnostics on:
+To use `gitlab-ci-ls` with Emacs `lsp-mode`, reference the below sample
+configuration.
 
-- invalid extends
-- invalid stages
+```emacs-lisp
+(add-to-list 'lsp-language-id-configuration '("\\.gitlab-ci\\.yml$" . "gitlabci"))
+(add-to-list 'lsp-language-id-configuration '("/ci-templates/.*\\.yml$" . "gitlabci"))
+
+(lsp-register-custom-settings
+  '(("gitlabci.cache" "/path/where/remote/folders/will/be/cached")
+    ("gitlabci.log_path" "/tmp/gitlab-ci-ls.log")))
+
+(lsp-register-client
+  (make-lsp-client :new-connection (lsp-stdio-connection '("gitlab-ci-ls"))
+                  :activation-fn (lsp-activate-on "gitlabci")
+                  :server-id 'gitlabci
+                  :priority 10
+                  :initialization-options (lambda () (gethash "gitlabci" (lsp-configuration-section "gitlabci")))))
+```
+
+## TODO
+
+- [ ] Smarter way to initialize, it should support root_dir equal to nil and once file is opened it should receive/calculate new root.
+- [x] Fix VSCode completion. It seems it also needs a range to correctly update text.
+- [x] Rename to gitlab-ci-ls.
+- [x] References for stages
+- [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
+- [ ] Support !reference
+- [ ] Handle default keyword
