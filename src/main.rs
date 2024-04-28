@@ -12,10 +12,10 @@ use lsp_types::{
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Write;
-use std::path::Path;
 
+use crate::gitlab_ci_ls_parser::fs_utils::{FSUtils, FSUtilsImpl};
 use crate::gitlab_ci_ls_parser::messages;
 
 mod gitlab_ci_ls_parser;
@@ -50,10 +50,7 @@ fn default_log_path() -> String {
 }
 
 fn default_cache_path() -> String {
-    let home = match dirs::home_dir() {
-        Some(path) => path.display().to_string(),
-        None => std::env::var("HOME").unwrap_or_default(),
-    };
+    let home = std::env::var("HOME").unwrap_or_default();
 
     format!("{home}/.gitlab-ci-ls/cache/")
 }
@@ -108,9 +105,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     })?;
 
     let initialization_params = connection.initialize(server_capabilities)?;
-
-    info!("params {:?}", initialization_params);
-
     let init_params = match serde_json::from_value::<InitializationParams>(initialization_params) {
         Ok(p) => p,
         Err(err) => {
@@ -127,22 +121,26 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     };
 
-    let path = Path::new(&init_params.initialization_options.log_path);
+    let home_path = std::env::var("HOME")?;
+    let fs_utils = FSUtilsImpl::new(home_path);
+
+    let path = fs_utils.get_path(&init_params.initialization_options.log_path);
     if let Some(dir_path) = path.parent() {
-        fs::create_dir_all(dir_path)?;
+        let _ = fs_utils.create_dir_all(dir_path.to_str().unwrap_or_default());
     }
 
     simple_logging::log_to_file(
-        &init_params.initialization_options.log_path,
+        fs_utils.get_path(&init_params.initialization_options.log_path),
         LevelFilter::Warn,
     )?;
 
-    let repository: Option<git2::Repository> = match Repository::open(&init_params.root_path) {
+    let root_path = fs_utils.get_path(&init_params.root_path);
+    let repository: Option<git2::Repository> = match Repository::open(&root_path) {
         Ok(repo) => Some(repo),
         Err(err) => {
             error!(
-                "could not open repository: {}; got err: {}",
-                &init_params.root_path, err
+                "could not open repository: {:?}; got err: {}",
+                &root_path, err
             );
 
             None
@@ -171,17 +169,22 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     }
 
-    if let Err(err) = save_base_files(&init_params) {
+    if let Err(err) = save_base_files(&init_params, &fs_utils) {
         error!("error saving base files; got err: {err}");
     }
 
-    let lsp_events =
-        gitlab_ci_ls_parser::handlers::LSPHandlers::new(gitlab_ci_ls_parser::LSPConfig {
-            cache_path: init_params.initialization_options.cache_path,
+    let lsp_events = gitlab_ci_ls_parser::handlers::LSPHandlers::new(
+        gitlab_ci_ls_parser::LSPConfig {
+            cache_path: fs_utils
+                .get_path(&init_params.initialization_options.cache_path)
+                .to_string_lossy()
+                .to_string(),
             package_map: init_params.initialization_options.package_map,
             remote_urls,
             root_dir: init_params.root_path,
-        });
+        },
+        Box::new(fs_utils),
+    );
 
     info!("initialized");
 
@@ -192,9 +195,17 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-fn save_base_files(init_params: &InitializationParams) -> anyhow::Result<()> {
-    let base_path = format!("{}base", init_params.initialization_options.cache_path);
-    fs::create_dir_all(&base_path)?;
+fn save_base_files(
+    init_params: &InitializationParams,
+    fs_utils: &FSUtilsImpl,
+) -> anyhow::Result<()> {
+    let base_path = format!(
+        "{}base",
+        fs_utils
+            .get_path(&init_params.initialization_options.cache_path)
+            .to_string_lossy()
+    );
+    let _ = fs_utils.create_dir_all(&base_path);
 
     let gitlab_predefined = include_str!("./resources/gitlab_predefined_vars.yaml");
     let gitlab_predefined_path = format!("{base_path}/gitlab_predefined_vars.yaml");

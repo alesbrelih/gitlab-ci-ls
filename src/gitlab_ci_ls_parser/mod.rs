@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use lsp_server::RequestId;
 use lsp_types::Diagnostic;
 
+pub mod fs_utils;
 pub mod git;
 pub mod handlers;
 pub mod messages;

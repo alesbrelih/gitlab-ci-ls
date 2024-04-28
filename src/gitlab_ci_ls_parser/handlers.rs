@@ -10,9 +10,9 @@ use lsp_types::{
 };
 
 use super::{
-    parser, parser_utils, treesitter, CompletionResult, DefinitionResult, DiagnosticsResult,
-    GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig, LSPLocation,
-    LSPPosition, LSPResult, Range, ReferencesResult,
+    fs_utils, parser, parser_utils, treesitter, CompletionResult, DefinitionResult,
+    DiagnosticsResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
+    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -27,7 +27,7 @@ pub struct LSPHandlers {
 }
 
 impl LSPHandlers {
-    pub fn new(cfg: LSPConfig) -> LSPHandlers {
+    pub fn new(cfg: LSPConfig, fs_utils: Box<dyn fs_utils::FSUtils>) -> LSPHandlers {
         let store = Mutex::new(HashMap::new());
         let nodes = Mutex::new(HashMap::new());
         let stages = Mutex::new(HashMap::new());
@@ -46,6 +46,7 @@ impl LSPHandlers {
                 cfg.package_map,
                 cfg.cache_path,
                 Box::new(treesitter::TreesitterImpl::new()),
+                fs_utils,
             )),
         };
 

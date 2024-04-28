@@ -6,7 +6,8 @@ use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults,
+    fs_utils, git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition,
+    ParseResults,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,10 +107,16 @@ impl ParserImpl {
         package_map: HashMap<String, String>,
         cache_path: String,
         treesitter: Box<dyn treesitter::Treesitter>,
+        fs_utils: Box<dyn fs_utils::FSUtils>,
     ) -> ParserImpl {
         ParserImpl {
             treesitter,
-            git: Box::new(git::GitImpl::new(remote_urls, package_map, cache_path)),
+            git: Box::new(git::GitImpl::new(
+                remote_urls,
+                package_map,
+                cache_path,
+                fs_utils,
+            )),
         }
     }
 

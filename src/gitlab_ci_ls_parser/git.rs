@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use super::{parser_utils, GitlabFile};
+use super::{
+    fs_utils::{self, FSUtils},
+    parser_utils, GitlabFile,
+};
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
 
@@ -27,6 +30,7 @@ pub struct GitImpl {
     package_map: HashMap<String, String>,
     remote_urls: Vec<String>,
     cache_path: String,
+    fs_utils: Box<dyn FSUtils>,
 }
 
 impl GitImpl {
@@ -34,11 +38,13 @@ impl GitImpl {
         remote_urls: Vec<String>,
         package_map: HashMap<String, String>,
         cache_path: String,
+        fs_utils: Box<dyn fs_utils::FSUtils>,
     ) -> Self {
         Self {
             package_map,
             remote_urls,
             cache_path,
+            fs_utils,
         }
     }
 }
@@ -112,7 +118,7 @@ impl Git for GitImpl {
             return Ok(vec![]);
         }
 
-        std::fs::create_dir_all(&self.cache_path)?;
+        self.fs_utils.create_dir_all(&self.cache_path)?;
 
         // check if we have that reference to repository
         let repo_dest = format!("{}{}/{}", &self.cache_path, remote_pkg, remote_tag);
@@ -153,9 +159,8 @@ impl Git for GitImpl {
 
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile> {
         let remote_cache_path = format!("{}remotes", &self.cache_path);
-        std::fs::create_dir_all(&remote_cache_path)?;
+        self.fs_utils.create_dir_all(&remote_cache_path)?;
 
-        // check if file was changed
         let file_hash = parser_utils::ParserUtils::remote_path_to_hash(url.as_str());
         let file_name_pattern = format!("_{file_hash}.yaml");
 
