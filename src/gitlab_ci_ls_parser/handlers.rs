@@ -12,7 +12,7 @@ use lsp_types::{
 use super::{
     fs_utils, parser, parser_utils, treesitter, CompletionResult, DefinitionResult,
     DiagnosticsResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
-    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
+    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -77,6 +77,33 @@ impl LSPHandlers {
                 for (document_uri, node) in nodes.iter() {
                     for (key, content) in node {
                         if key.eq(word) {
+                            let cnt = match self.parser.get_full_definition(
+                                GitlabElement {
+                                    key: key.clone(),
+                                    content: Some(content.to_string()),
+                                    uri: document_uri.to_string(),
+                                    ..Default::default()
+                                },
+                                &store,
+                            ) {
+                                Ok(c) => c,
+                                Err(err) => return Some(LSPResult::Error(err)),
+                            };
+
+                            return Some(LSPResult::Hover(HoverResult {
+                                id: request.id,
+                                content: format!("```yaml\n{cnt}\n```"),
+                            }));
+                        }
+                    }
+                }
+
+                None
+            }
+            parser::PositionType::RuleReference(RuleReference { node }) => {
+                for (document_uri, n) in nodes.iter() {
+                    for (key, content) in n {
+                        if key.eq(&node) {
                             let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
@@ -201,6 +228,7 @@ impl LSPHandlers {
         None
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn on_definition(&self, request: Request) -> Option<LSPResult> {
         let params = serde_json::from_value::<GotoTypeDefinitionParams>(request.params).ok()?;
 
@@ -297,6 +325,16 @@ impl LSPHandlers {
                     .collect::<Vec<LSPLocation>>();
 
                 locations.append(&mut root);
+            }
+            parser::PositionType::RuleReference(RuleReference { node }) => {
+                for (uri, content) in store {
+                    if let Some(element) = self.parser.get_root_node(uri, content, &node) {
+                        locations.push(LSPLocation {
+                            uri: uri.clone(),
+                            range: element.range,
+                        });
+                    }
+                }
             }
             parser::PositionType::None => {
                 error!("invalid position type for goto def");
@@ -443,6 +481,9 @@ impl LSPHandlers {
             parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
             parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
             parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
+            parser::PositionType::RuleReference(_) => {
+                self.on_completion_rule_reference(line, position).ok()?
+            }
             _ => return None,
         };
 
@@ -469,7 +510,10 @@ impl LSPHandlers {
             position.character as usize,
             |c: char| c.is_whitespace(),
         );
-        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace()
+            });
 
         let items = stages
             .keys()
@@ -513,7 +557,10 @@ impl LSPHandlers {
             |c: char| c.is_whitespace(),
         );
 
-        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace()
+            });
 
         let items = nodes
             .values()
@@ -563,7 +610,10 @@ impl LSPHandlers {
             |c: char| c == '$',
         );
 
-        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace()
+            });
 
         let items = variables
             .keys()
@@ -592,6 +642,57 @@ impl LSPHandlers {
         Ok(items)
     }
 
+    fn on_completion_rule_reference(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let nodes = self
+            .nodes
+            .lock()
+            .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
+
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c == '\'' || c == '"',
+        );
+
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c == '\'' || c == '"'
+            });
+
+        let items = nodes
+            .values()
+            .flat_map(|needs| needs.iter())
+            .filter(|(node_key, _)| node_key.contains(word))
+            .flat_map(
+                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
+                    Ok(LSPCompletion {
+                        label: node_key.clone(),
+                        details: Some(node_description.clone()),
+                        location: LSPLocation {
+                            range: Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position.character - u32::try_from(word.len())?,
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character + u32::try_from(after.len())?,
+                                },
+                            },
+                            ..Default::default()
+                        },
+                    })
+                },
+            )
+            .collect();
+
+        Ok(items)
+    }
+
     fn on_completion_needs(
         &self,
         line: &str,
@@ -606,7 +707,10 @@ impl LSPHandlers {
             position.character as usize,
             |c: char| c.is_whitespace(),
         );
-        let after = parser_utils::ParserUtils::word_after_cursor(line, position.character as usize);
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace()
+            });
 
         let items = nodes
             .values()

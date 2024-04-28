@@ -1,10 +1,12 @@
+use std::usize;
+
 use log::error;
 use lsp_types::Position;
 use tree_sitter::{Query, QueryCursor};
 
 use super::{
     parser, treesitter_queries::TreesitterQueries, GitlabElement, Include, IncludeInformation,
-    LSPPosition, NodeDefinition, Range, RemoteInclude,
+    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -409,7 +411,11 @@ impl Treesitter for TreesitterImpl {
         let project_name_index = query.capture_index_for_name("project_value").unwrap();
         let project_ref_index = query.capture_index_for_name("ref_value").unwrap();
         let project_file_index = query.capture_index_for_name("file_value").unwrap();
+        let project_item_index = query.capture_index_for_name("remote_include_item").unwrap();
         let basic_include_index = query.capture_index_for_name("basic_include_value").unwrap();
+        let rule_reference_index = query
+            .capture_index_for_name("rule_reference_value")
+            .unwrap();
 
         for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
@@ -426,8 +432,10 @@ impl Treesitter for TreesitterImpl {
                 .any(|c| remote_include_indexes.contains(&c.index))
             {
                 for c in mat.captures {
-                    let Some(bounding) = mat.captures.iter().find(|c| c.index == 17) else {
-                        error!("couldn't find index 17 even though its remote capture");
+                    let Some(bounding) =
+                        mat.captures.iter().find(|c| c.index == project_item_index)
+                    else {
+                        error!("couldn't find index {project_item_index} even though its remote capture");
 
                         return parser::PositionType::None;
                     };
@@ -466,6 +474,8 @@ impl Treesitter for TreesitterImpl {
                 for c in mat.captures {
                     if c.node.start_position().row <= position.line as usize
                         && c.node.end_position().row >= position.line as usize
+                        && c.node.start_position().column <= position.character as usize
+                        && c.node.end_position().column >= position.character as usize
                     {
                         match c.index {
                             idx if idx == extends_index => return parser::PositionType::Extend,
@@ -501,8 +511,20 @@ impl Treesitter for TreesitterImpl {
                                     ..Default::default()
                                 })
                             }
+                            idx if idx == rule_reference_index => {
+                                return parser::PositionType::RuleReference(RuleReference {
+                                    node: content[c.node.byte_range()]
+                                        .trim_matches('\'')
+                                        .trim_matches('"')
+                                        .to_string(),
+                                })
+                            }
                             _ => {
                                 error!("invalid index: {}", c.index);
+                                error!(
+                                    "invalid index content: {}",
+                                    content[c.node.byte_range()].to_string()
+                                );
 
                                 parser::PositionType::None
                             }
@@ -1431,7 +1453,7 @@ job_one:
             cnt,
             Position {
                 line: 6,
-                character: 10,
+                character: 14,
             },
         );
 
@@ -1476,7 +1498,7 @@ job_one:
             cnt,
             Position {
                 line: 7,
-                character: 15,
+                character: 20,
             },
         );
 
@@ -1521,7 +1543,7 @@ job_one:
             cnt,
             Position {
                 line: 11,
-                character: 12,
+                character: 15,
             },
         );
 
@@ -1623,7 +1645,7 @@ job_one:
             cnt,
             Position {
                 line: 17,
-                character: 12,
+                character: 17,
             },
         );
 
@@ -1631,6 +1653,80 @@ job_one:
         match pos_type {
             parser::PositionType::Needs(NodeDefinition { name }) => {
                 assert_eq!(want_name, name);
+            }
+            _ => panic!("invalid type"),
+        }
+    }
+
+    #[test]
+    fn test_get_position_type_rule_reference() {
+        let cnt = r"
+    .rules:job:
+      rules:
+        - test
+    job_one:
+      image: alpine
+      extends: .first
+      stage: one
+      rules:
+        - !reference ['.rules:job', rules]
+      variables:
+        SEARCHED: no
+        OTHER: yes
+      needs:
+        - job: job_one
+    ";
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 9,
+                character: 25,
+            },
+        );
+
+        let want_node = ".rules:job";
+        match pos_type {
+            parser::PositionType::RuleReference(RuleReference { node }) => {
+                assert_eq!(want_node, node);
+            }
+            _ => panic!("invalid type"),
+        }
+    }
+
+    #[test]
+    fn test_get_position_type_rule_reference_double_quote() {
+        let cnt = r#"
+    .rules:job:
+      rules:
+        - test
+    job_one:
+      image: alpine
+      extends: .first
+      stage: one
+      rules:
+        - !reference [".rules:job", rules]
+      variables:
+        SEARCHED: no
+        OTHER: yes
+      needs:
+        - job: job_one
+    "#;
+
+        let treesitter = TreesitterImpl::new();
+        let pos_type = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 9,
+                character: 25,
+            },
+        );
+
+        let want_node = ".rules:job";
+        match pos_type {
+            parser::PositionType::RuleReference(RuleReference { node }) => {
+                assert_eq!(want_node, node);
             }
             _ => panic!("invalid type"),
         }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     fs_utils, git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition,
-    ParseResults,
+    ParseResults, RuleReference,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +99,7 @@ pub enum PositionType {
     RootNode,
     Include(IncludeInformation),
     Needs(NodeDefinition),
+    RuleReference(RuleReference),
 }
 
 impl ParserImpl {

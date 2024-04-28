@@ -409,7 +409,7 @@ impl TreesitterQueries {
                                                         )
                                                     ]
                                                 )
-                                            )@item
+                                            )@remote_include_item
                                         )
                                     )
                                 )
@@ -479,8 +479,37 @@ impl TreesitterQueries {
             )
         "#;
 
+        // (_)? means optional any node
+        let search_rule_references = r#"
+        (
+            block_mapping_pair
+            key: (flow_node) @rule_reference_key
+            value: (
+                block_node(
+                    block_sequence(
+                        block_sequence_item(
+                            flow_node
+                            (
+                              (tag)@rule_reference_tag
+                              (
+                                flow_sequence(
+                                    (flow_node[(single_quote_scalar)(double_quote_scalar)])@rule_reference_value
+                                    (_)?
+                                )
+                               )
+                            )
+                        )
+                    )
+                )
+            )
+            (#eq? @rule_reference_key "rules")
+            (#eq? @rule_reference_tag "!reference")
+        )
+        "#;
+
         format!(
             r#"
+            {search_rule_references}
             {search_extends}
             {search_stages}
             {search_variables}

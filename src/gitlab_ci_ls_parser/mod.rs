@@ -132,6 +132,11 @@ pub struct IncludeInformation {
     pub basic: Option<Include>,
 }
 
+#[derive(Debug, Default)]
+pub struct RuleReference {
+    pub node: String,
+}
+
 #[derive(Debug)]
 pub struct NodeDefinition {
     pub name: String,

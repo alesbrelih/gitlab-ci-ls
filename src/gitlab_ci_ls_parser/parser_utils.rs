@@ -41,7 +41,11 @@ impl ParserUtils {
         &line[start..char_index]
     }
 
-    pub fn word_after_cursor(line: &str, char_index: usize) -> &str {
+    pub fn word_after_cursor(
+        line: &str,
+        char_index: usize,
+        predicate: fn(c: char) -> bool,
+    ) -> &str {
         if char_index >= line.len() {
             return "";
         }
@@ -50,7 +54,7 @@ impl ParserUtils {
 
         let end = line[start..]
             .char_indices()
-            .find(|&(_, c)| c.is_whitespace())
+            .find(|&(_, c)| predicate(c))
             .map_or(line.len(), |(idx, _)| start + idx);
 
         &line[start..end]
