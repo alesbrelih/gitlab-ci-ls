@@ -52,7 +52,7 @@ fn default_log_path() -> String {
 fn default_cache_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
 
-    format!("{home}/.gitlab-ci-ls/cache/")
+    format!("{home}/.cache/.gitlab-ci-ls")
 }
 
 #[allow(clippy::too_many_lines)]
