@@ -277,6 +277,18 @@ impl ParserImpl {
         };
         Some(())
     }
+
+    // Currently just gets the first default definition. IF there are multiple
+    // they get ignored
+    fn get_default_node(&self, store: &HashMap<String, String>) -> Option<GitlabElement> {
+        for (uri, content) in store {
+            if let Some(node) = self.treesitter.get_root_node(uri, content, "default") {
+                return Some(node);
+            }
+        }
+
+        None
+    }
 }
 
 impl Parser for ParserImpl {
@@ -460,6 +472,9 @@ impl Parser for ParserImpl {
         let mut all_nodes = vec![];
 
         self.all_nodes(store, &mut all_nodes, element.clone(), 0);
+        if let Some(default) = self.get_default_node(store) {
+            all_nodes.push(default);
+        }
 
         let init = serde_yaml::from_str("")
             .map_err(|e| anyhow!("error initializing empty yaml node; got err: {e}"))?;

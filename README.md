@@ -99,5 +99,5 @@ configuration.
 - [x] Rename to gitlab-ci-ls.
 - [x] References for stages
 - [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
-- [ ] Support !reference
-- [ ] Handle default keyword
+- [x] Support !reference
+- [x] Handle default keyword
