@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use log::{error, info};
+use log::{error, info, warn};
 use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,7 @@ enum IncludeItem {
     Local(Local),
     Remote(Remote),
     Basic(String),
+    Component(Component),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,6 +43,12 @@ struct Local {
 #[derive(Debug, Serialize, Deserialize)]
 struct Remote {
     remote: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Component {
+    component: String,
+    inputs: HashMap<String, String>,
 }
 
 pub trait Parser {
@@ -418,6 +425,9 @@ impl Parser for ParserImpl {
                         };
 
                         self.parse_remote_files(parse_results, &remote_files);
+                    }
+                    IncludeItem::Component(_) => {
+                        warn!("component handling not yet implemented.");
                     }
                 }
             }
