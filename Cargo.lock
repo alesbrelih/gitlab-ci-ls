@@ -1253,8 +1253,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter-yaml"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c617b5ad28e66af17f9444e32cf0f0a04d0359bae8204a0924e0e05043820df7"
+source = "git+https://github.com/tree-sitter-grammars/tree-sitter-yaml?rev=49db816#49db816e6a644ea5914daad801514d9f830e4c88"
 dependencies = [
  "cc",
  "tree-sitter",
