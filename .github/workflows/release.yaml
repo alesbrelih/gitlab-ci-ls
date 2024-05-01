@@ -4,19 +4,150 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+# Allow only one release workflow at a time to avoid using shared resources (tags, ...).
+# See https://docs.github.com/en/actions/using-jobs/using-concurrency for details.
+concurrency:
+  group: ${{ github.workflow }}
+
+permissions:
+  contents: write
+
 jobs:
+  get-next-version:
+    uses: semantic-release-action/next-release-version/.github/workflows/next-release-version.yml@v4
+
+  build:
+    name: Build for ${{ matrix.target }}
+    if: needs.get-next-version.outputs.new-release-published == 'true'
+    runs-on: ${{ matrix.build.os }}
+    needs:
+      - get-next-version
+
+    strategy:
+      matrix:
+        build:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cross: true
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        id: rust-toolchain
+        with:
+          toolchain: stable
+          target: ${{ matrix.build.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        id: cache-cargo
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ steps.rust-toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install semantic-release-cargo
+        uses: taiki-e/install-action@v2
+        with:
+          tool: semantic-release-cargo@2
+
+      - name: Prepare semantic-release for Rust
+        run: semantic-release-cargo prepare ${{ needs.get-next-version.outputs.new-release-version }}
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Configure cross
+        if: matrix.build.cross
+        run: echo "CARGO=cross" >> "$GITHUB_ENV"
+
+      - name: Compile release binary
+        run: cargo build --release --target ${{ matrix.build.target }} --verbose
+
+      - name: Create release archive
+        run: |
+          mkdir dist
+          cp target/${{ matrix.build.target }}/release/gitlab-ci-ls dist/gitlab-ci-ls-${{ matrix.build.target }}
+
+      - name: Create binary checksum
+        run: shasum --algorithm 256 --binary gitlab-ci-ls-${{ matrix.build.target }} | tee gitlab-ci-ls-${{ matrix.build.target }}-checksums.txt
+        working-directory: ./dist
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.target }}
+          path: |
+            dist/gitlab-ci-ls-${{ matrix.build.target }}
+            dist/gitlab-ci-ls-${{ matrix.build.target }}-checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
   release:
-    name: Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+    name: Release
+    if: needs.get-next-version.outputs.new-release-published == 'true'
+    needs:
+      - build
+      - get-next-version
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        id: rust-toolchain
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        id: cache-cargo
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ steps.rust-toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: ls artifacts
+        run: ls -R ./artifacts
+
+      - name: Prepare GitHub Release artifacts
+        run: |
+          mkdir ./dist
+          mv ./artifacts/x86_64-apple-darwin ./dist
+          mv ./artifacts/aarch64-apple-darwin ./dist
+          mv ./artifacts/x86_64-unknown-linux-gnu ./dist
+
+      - name: Combine checksums
+        run: cat dist/**/gitlab-ci-ls-*-checksums.txt | tee dist/checksums.txt
+
       - name: Semantic Release
         uses: cycjimmy/semantic-release-action@v4
         with:
