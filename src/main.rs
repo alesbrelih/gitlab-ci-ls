@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use clap::Parser;
 use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,10 @@ use crate::gitlab_ci_ls_parser::fs_utils::{FSUtils, FSUtilsImpl};
 use crate::gitlab_ci_ls_parser::messages;
 
 mod gitlab_ci_ls_parser;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct InitializationOptions {
@@ -57,6 +62,8 @@ fn default_cache_path() -> String {
 
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+    Args::parse();
+
     let (connection, io_threads) = Connection::stdio();
 
     let server_capabilities = serde_json::to_value(ServerCapabilities {
