@@ -5,8 +5,10 @@ use lsp_types::Position;
 use tree_sitter::{Query, QueryCursor};
 
 use super::{
-    parser, treesitter_queries::TreesitterQueries, GitlabElement, Include, IncludeInformation,
-    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
+    parser::{self},
+    treesitter_queries::TreesitterQueries,
+    Component, ComponentInput, GitlabElement, Include, IncludeInformation, LSPPosition,
+    NodeDefinition, Range, RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -47,6 +49,60 @@ pub struct TreesitterImpl {}
 impl TreesitterImpl {
     pub fn new() -> Self {
         Self {}
+    }
+
+    fn get_position_type_component(
+        mat: tree_sitter::QueryMatch<'_, '_>,
+        position: Position,
+        content: &str,
+        full_component_index: u32,
+        component_uri_index: u32,
+        component_input_index: u32,
+    ) -> Option<parser::PositionType> {
+        let mut component = Component {
+            ..Default::default()
+        };
+
+        let Some(full) = mat
+            .captures
+            .iter()
+            .find(|c| c.index == full_component_index)
+        else {
+            error!("couldn't find index {full_component_index} even though its remote capture");
+
+            return None;
+        };
+
+        if full.node.start_position().row <= position.line as usize
+            && full.node.end_position().row >= position.line as usize
+        {
+            let mut inputs = vec![];
+            for c in mat.captures {
+                match c.index {
+                    idx if idx == component_uri_index => {
+                        component.uri = Some(content[c.node.byte_range()].to_string());
+                    }
+                    idx if idx == component_input_index => {
+                        let key = content[c.node.byte_range()].to_string();
+                        let hovered = c.node.start_position().row == position.line as usize;
+
+                        inputs.push(ComponentInput { key, hovered });
+                    }
+                    _ => continue,
+                };
+            }
+
+            component.inputs = inputs;
+            return Some(parser::PositionType::Include(IncludeInformation {
+                remote: None,
+                remote_url: None,
+                local: None,
+                basic: None,
+                component: Some(component),
+            }));
+        }
+
+        None
     }
 }
 
@@ -416,9 +472,9 @@ impl Treesitter for TreesitterImpl {
         let rule_reference_index = query
             .capture_index_for_name("rule_reference_value")
             .unwrap();
-        let component_uri_index = query
-            .capture_index_for_name("component_include_value")
-            .unwrap();
+        let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
+        let component_input_index = query.capture_index_for_name("component_input").unwrap();
+        let full_component_index = query.capture_index_for_name("full_component").unwrap();
 
         for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
@@ -429,26 +485,39 @@ impl Treesitter for TreesitterImpl {
             // group is wrong.
             let remote_include_indexes =
                 [project_name_index, project_ref_index, project_file_index];
-            if mat
+
+            // If its component
+            if mat.captures.iter().any(|c| c.index == full_component_index) {
+                if let Some(position_type) = TreesitterImpl::get_position_type_component(
+                    mat,
+                    position,
+                    content,
+                    full_component_index,
+                    component_uri_index,
+                    component_input_index,
+                ) {
+                    return position_type;
+                }
+            } else if mat
                 .captures
                 .iter()
                 .any(|c| remote_include_indexes.contains(&c.index))
             {
+                let Some(bounding) = mat.captures.iter().find(|c| c.index == project_item_index)
+                else {
+                    error!(
+                        "couldn't find index {project_item_index} even though its remote capture"
+                    );
+
+                    return parser::PositionType::None;
+                };
+
+                if bounding.node.start_position().row > position.line as usize
+                    && bounding.node.end_position().row < position.line as usize
+                {
+                    continue;
+                }
                 for c in mat.captures {
-                    let Some(bounding) =
-                        mat.captures.iter().find(|c| c.index == project_item_index)
-                    else {
-                        error!("couldn't find index {project_item_index} even though its remote capture");
-
-                        return parser::PositionType::None;
-                    };
-
-                    if bounding.node.start_position().row > position.line as usize
-                        && bounding.node.end_position().row < position.line as usize
-                    {
-                        continue;
-                    }
-
                     match c.index {
                         idx if idx == project_name_index => {
                             remote_include.project = Some(content[c.node.byte_range()].to_string());
@@ -509,14 +578,6 @@ impl Treesitter for TreesitterImpl {
                             idx if idx == basic_include_index => {
                                 return parser::PositionType::Include(IncludeInformation {
                                     basic: Some(Include {
-                                        path: content[c.node.byte_range()].to_string(),
-                                    }),
-                                    ..Default::default()
-                                })
-                            }
-                            idx if idx == component_uri_index => {
-                                return parser::PositionType::Include(IncludeInformation {
-                                    component: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
                                     ..Default::default()

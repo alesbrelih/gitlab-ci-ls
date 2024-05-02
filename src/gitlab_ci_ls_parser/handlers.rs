@@ -402,10 +402,12 @@ impl LSPHandlers {
                 basic: None,
                 component: Some(component),
             } => {
-                let file = component.path.trim_matches('"').trim_matches('\'');
+                error!("HELLO: {:?}", component);
+                let file = component.uri?;
+                let file = file.trim_matches('"').trim_matches('\'').to_string();
 
                 let component_info =
-                    match parser_utils::ParserUtils::extract_component_from_uri(file) {
+                    match parser_utils::ParserUtils::extract_component_from_uri(&file) {
                         Ok(c) => c,
                         Err(err) => {
                             error!("error extracting component info from uri; got: {err}");
@@ -440,6 +442,7 @@ impl LSPHandlers {
                         });
                 }
 
+                error!("could not find component for: {file}; at: {repo_dest}");
                 None
             }
             IncludeInformation {

@@ -118,6 +118,17 @@ pub struct RemoteInclude {
     pub file: Option<String>,
 }
 
+#[derive(Debug, Default)]
+pub struct ComponentInput {
+    pub key: String,
+    pub hovered: bool,
+}
+#[derive(Debug, Default)]
+pub struct Component {
+    pub uri: Option<String>,
+    pub inputs: Vec<ComponentInput>,
+}
+
 impl RemoteInclude {
     pub fn is_valid(&self) -> bool {
         self.project.is_some() && self.reference.is_some() && self.file.is_some()
@@ -130,7 +141,7 @@ pub struct IncludeInformation {
     pub remote_url: Option<Include>,
     pub local: Option<Include>,
     pub basic: Option<Include>,
-    pub component: Option<Include>,
+    pub component: Option<Component>,
 }
 
 #[derive(Debug, Default)]
