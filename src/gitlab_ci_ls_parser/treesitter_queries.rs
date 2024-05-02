@@ -423,6 +423,22 @@ impl TreesitterQueries {
             )
         "#;
 
+        let search_component_include = r#"
+        (
+            block_sequence_item(
+                block_node(
+                    block_mapping(
+                        (block_mapping_pair
+                            key: (flow_node(plain_scalar(string_scalar)@component_include_key))
+                            value: (flow_node) @component_include_value
+                        )
+                    )
+                )
+            )
+            (#eq? @component_include_key "component")
+        )
+        "#;
+
         let search_job_needs = r#"
             (
                 block_mapping_pair
@@ -516,6 +532,7 @@ impl TreesitterQueries {
             {search_root_node}
             {search_local_include}
             {search_project_includes}
+            {search_component_include}
             {search_job_needs}
             {search_remote_urls}
             {search_basic_include}

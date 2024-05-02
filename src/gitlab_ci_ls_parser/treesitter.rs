@@ -416,6 +416,9 @@ impl Treesitter for TreesitterImpl {
         let rule_reference_index = query
             .capture_index_for_name("rule_reference_value")
             .unwrap();
+        let component_uri_index = query
+            .capture_index_for_name("component_include_value")
+            .unwrap();
 
         for mat in matches {
             // If this is a remote reference capture, I need to capture multiple values
@@ -506,6 +509,14 @@ impl Treesitter for TreesitterImpl {
                             idx if idx == basic_include_index => {
                                 return parser::PositionType::Include(IncludeInformation {
                                     basic: Some(Include {
+                                        path: content[c.node.byte_range()].to_string(),
+                                    }),
+                                    ..Default::default()
+                                })
+                            }
+                            idx if idx == component_uri_index => {
+                                return parser::PositionType::Include(IncludeInformation {
+                                    component: Some(Include {
                                         path: content[c.node.byte_range()].to_string(),
                                     }),
                                     ..Default::default()
@@ -1417,6 +1428,7 @@ job_one:
                 local: None,
                 remote_url: None,
                 basic: None,
+                component: None,
             }) => {
                 assert_eq!(want_project, project);
                 assert_eq!(want_reference, reference);
@@ -1464,6 +1476,7 @@ job_one:
                 local: Some(Include { path }),
                 remote_url: None,
                 basic: None,
+                component: None,
             }) => {
                 assert_eq!(want_path, path);
             }
@@ -1509,6 +1522,7 @@ job_one:
                 local: None,
                 remote_url: Some(Include { path }),
                 basic: None,
+                component: None,
             }) => {
                 assert_eq!(want_path, path);
             }

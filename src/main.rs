@@ -105,21 +105,22 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     })?;
 
     let initialization_params = connection.initialize(server_capabilities)?;
-    let init_params = match serde_json::from_value::<InitializationParams>(initialization_params) {
-        Ok(p) => p,
-        Err(err) => {
-            error!("error deserializing init params; got err {}", err);
+    let init_params =
+        match serde_json::from_value::<InitializationParams>(initialization_params.clone()) {
+            Ok(p) => p,
+            Err(err) => {
+                error!("error deserializing init params; got err {}", err);
 
-            InitializationParams {
-                root_path: String::new(),
-                initialization_options: InitializationOptions {
-                    log_path: default_log_path(),
-                    package_map: HashMap::new(),
-                    cache_path: default_cache_path(),
-                },
+                InitializationParams {
+                    root_path: String::new(),
+                    initialization_options: InitializationOptions {
+                        log_path: default_log_path(),
+                        package_map: HashMap::new(),
+                        cache_path: default_cache_path(),
+                    },
+                }
             }
-        }
-    };
+        };
 
     let home_path = std::env::var("HOME")?;
     let fs_utils = FSUtilsImpl::new(home_path);

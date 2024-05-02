@@ -264,7 +264,7 @@ impl LSPHandlers {
                 }
             }
             parser::PositionType::Include(info) => {
-                if let Some(include) = LSPHandlers::on_definition_include(info, store) {
+                if let Some(include) = self.on_definition_include(info, store) {
                     locations.push(include);
                 }
             }
@@ -348,7 +348,9 @@ impl LSPHandlers {
         }))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn on_definition_include(
+        &self,
         info: IncludeInformation,
         store: &HashMap<String, String>,
     ) -> Option<LSPLocation> {
@@ -358,6 +360,7 @@ impl LSPHandlers {
                 remote: None,
                 remote_url: None,
                 basic: None,
+                component: None,
             } => {
                 let local = parser_utils::ParserUtils::strip_quotes(&local.path);
 
@@ -368,6 +371,7 @@ impl LSPHandlers {
                 remote: Some(remote),
                 remote_url: None,
                 basic: None,
+                component: None,
             } => {
                 let file = remote.file?;
                 let file = parser_utils::ParserUtils::strip_quotes(&file).trim_start_matches('/');
@@ -394,8 +398,56 @@ impl LSPHandlers {
             IncludeInformation {
                 local: None,
                 remote: None,
+                remote_url: None,
+                basic: None,
+                component: Some(component),
+            } => {
+                let file = component.path.trim_matches('"').trim_matches('\'');
+
+                let component_info =
+                    match parser_utils::ParserUtils::extract_component_from_uri(file) {
+                        Ok(c) => c,
+                        Err(err) => {
+                            error!("error extracting component info from uri; got: {err}");
+
+                            return None;
+                        }
+                    };
+
+                let repo_dest = parser_utils::ParserUtils::get_component_dest_dir(
+                    &self.cfg.cache_path,
+                    &component_info,
+                );
+
+                if let Ok(component) =
+                    parser_utils::ParserUtils::get_component(&repo_dest, &component_info.component)
+                {
+                    return store
+                        .keys()
+                        .find(|uri| uri.ends_with(&component.uri))
+                        .map(|uri| LSPLocation {
+                            uri: uri.clone(),
+                            range: Range {
+                                start: LSPPosition {
+                                    line: 0,
+                                    character: 0,
+                                },
+                                end: LSPPosition {
+                                    line: 0,
+                                    character: 0,
+                                },
+                            },
+                        });
+                }
+
+                None
+            }
+            IncludeInformation {
+                local: None,
+                remote: None,
                 remote_url: Some(remote_url),
                 basic: None,
+                component: None,
             } => {
                 let remote_url = parser_utils::ParserUtils::strip_quotes(remote_url.path.as_str());
                 LSPHandlers::on_definition_remote(remote_url, store)
@@ -405,6 +457,7 @@ impl LSPHandlers {
                 remote: None,
                 remote_url: None,
                 basic: Some(basic_url),
+                component: None,
             } => {
                 let url = parser_utils::ParserUtils::strip_quotes(&basic_url.path);
                 if let Ok(url) = Url::parse(url) {

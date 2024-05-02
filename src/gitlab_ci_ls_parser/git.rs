@@ -9,7 +9,8 @@ use std::{
 
 use super::{
     fs_utils::{self, FSUtils},
-    parser_utils, GitlabFile,
+    parser_utils::{self, ComponentInfo, ParserUtils},
+    GitlabElement, GitlabFile,
 };
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
@@ -23,6 +24,10 @@ pub trait Git {
         remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>>;
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
+    fn fetch_remote_component(
+        &self,
+        component_info: ComponentInfo,
+    ) -> anyhow::Result<GitlabElement>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -46,6 +51,53 @@ impl GitImpl {
             cache_path,
             fs_utils,
         }
+    }
+
+    fn clone_component_repo(repo_dest: &str, component_info: &ComponentInfo) {
+        let repo_dest_path = std::path::Path::new(&repo_dest);
+
+        info!("repo_path: {:?}", repo_dest_path);
+
+        if repo_dest_path.exists() {
+            let mut repo_contents = match repo_dest_path.read_dir() {
+                Ok(contents) => contents,
+                Err(err) => {
+                    error!("error reading repo contents; got err: {}", err);
+                    return;
+                }
+            };
+
+            if repo_contents.next().is_some() {
+                info!("repo contents exist");
+
+                return;
+            }
+        }
+
+        match Command::new("git")
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                &component_info.version,
+                format!("git@{}:{}", component_info.host, component_info.project).as_str(),
+                &repo_dest,
+            ])
+            .output()
+        {
+            Ok(ok) => {
+                info!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
+            }
+            Err(err) => {
+                error!("error cloning to: {}, got: {:?}", repo_dest, err);
+
+                let dest = path::Path::new(repo_dest);
+                if dest.exists() {
+                    fs::remove_dir_all(dest).expect("should be able to remove");
+                }
+            }
+        };
     }
 }
 
@@ -229,5 +281,18 @@ impl Git for GitImpl {
                 content: text,
             })
         }
+    }
+
+    fn fetch_remote_component(
+        &self,
+        component_info: ComponentInfo,
+    ) -> anyhow::Result<GitlabElement> {
+        // TODO: handle slashes correctly..
+
+        let repo_dest = ParserUtils::get_component_dest_dir(&self.cache_path, &component_info);
+        self.fs_utils.create_dir_all(&repo_dest)?;
+
+        GitImpl::clone_component_repo(repo_dest.as_str(), &component_info);
+        ParserUtils::get_component(&repo_dest, &component_info.component)
     }
 }

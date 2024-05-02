@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use log::{error, info, warn};
+use log::{error, info};
 use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    fs_utils, git, treesitter, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition,
-    ParseResults, RuleReference,
+    fs_utils, git, parser_utils::ParserUtils, treesitter, GitlabElement, GitlabFile,
+    IncludeInformation, NodeDefinition, ParseResults, RuleReference,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,14 +41,14 @@ struct Local {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Remote {
-    remote: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct Component {
     component: String,
     inputs: HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Remote {
+    remote: String,
 }
 
 pub trait Parser {
@@ -426,8 +426,26 @@ impl Parser for ParserImpl {
 
                         self.parse_remote_files(parse_results, &remote_files);
                     }
-                    IncludeItem::Component(_) => {
-                        warn!("component handling not yet implemented.");
+                    IncludeItem::Component(node) => {
+                        let component_info =
+                            match ParserUtils::extract_component_from_uri(&node.component) {
+                                Ok(c) => c,
+                                Err(err) => {
+                                    error!("error extracting component info from uri; got: {err}");
+
+                                    continue;
+                                }
+                            };
+
+                        let gitlab_component = self.git.fetch_remote_component(component_info);
+                        if let Ok(element) = gitlab_component {
+                            parse_results.files.push(GitlabFile {
+                                path: element.uri,
+                                content: element.content.unwrap_or_default(),
+                            });
+                        } else {
+                            error!("could not find gitlab component: {:?}", gitlab_component);
+                        }
                     }
                 }
             }
