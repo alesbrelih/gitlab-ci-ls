@@ -1,10 +1,10 @@
-use log::warn;
+use log::info;
 
 use super::GitlabElement;
 
 pub struct ParserUtils {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ComponentInfo {
     pub host: String,
     pub project: String,
@@ -130,7 +130,7 @@ impl ParserUtils {
                     });
                 }
                 Err(err) => {
-                    warn!("could not find component; path: {p}, got err: {err}");
+                    info!("could not find component; path: {p}, got err: {err}");
                 }
             };
         }

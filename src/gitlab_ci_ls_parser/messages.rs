@@ -166,7 +166,7 @@ fn completion(result: CompletionResult) -> Message {
                         item.documentation =
                             Some(lsp_types::Documentation::MarkupContent(MarkupContent {
                                 kind: lsp_types::MarkupKind::Markdown,
-                                value: format!("```yaml\r\n{}\r\n```", documentation.clone()),
+                                value: documentation.clone(),
                             }));
                     }
 

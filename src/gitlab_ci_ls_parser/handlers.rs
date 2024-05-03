@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Instant};
 
 use anyhow::anyhow;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
@@ -10,7 +10,7 @@ use lsp_types::{
 };
 
 use super::{
-    fs_utils, parser, parser_utils, treesitter, CompletionResult, DefinitionResult,
+    fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, DefinitionResult,
     DiagnosticsResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
     LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult, RuleReference,
 };
@@ -22,6 +22,7 @@ pub struct LSPHandlers {
     nodes: Mutex<HashMap<String, HashMap<String, String>>>,
     stages: Mutex<HashMap<String, GitlabElement>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
+    components: Mutex<HashMap<String, Component>>,
     indexing_in_progress: Mutex<bool>,
     parser: Box<dyn parser::Parser>,
 }
@@ -32,6 +33,7 @@ impl LSPHandlers {
         let nodes = Mutex::new(HashMap::new());
         let stages = Mutex::new(HashMap::new());
         let variables = Mutex::new(HashMap::new());
+        let components = Mutex::new(HashMap::new());
         let indexing_in_progress = Mutex::new(false);
 
         let events = LSPHandlers {
@@ -40,6 +42,7 @@ impl LSPHandlers {
             nodes,
             stages,
             variables,
+            components,
             indexing_in_progress,
             parser: Box::new(parser::ParserImpl::new(
                 cfg.remote_urls,
@@ -149,6 +152,8 @@ impl LSPHandlers {
 
         let mut all_variables = self.variables.lock().unwrap();
 
+        let mut all_components = self.components.lock().unwrap();
+
         if let Some(results) = self.parser.parse_contents(
             &params.text_document.uri,
             &params.content_changes.first()?.text,
@@ -181,6 +186,11 @@ impl LSPHandlers {
             for variable in results.variables {
                 info!("found variable: {:?}", &variable);
                 all_variables.insert(variable.key.clone(), variable);
+            }
+
+            for component in results.components {
+                info!("found component: {:?}", &component);
+                all_components.insert(component.uri.clone(), component);
             }
         }
 
@@ -402,48 +412,30 @@ impl LSPHandlers {
                 basic: None,
                 component: Some(component),
             } => {
-                error!("HELLO: {:?}", component);
-                let file = component.uri?;
-                let file = file.trim_matches('"').trim_matches('\'').to_string();
+                let component_uri = component
+                    .uri
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
 
-                let component_info =
-                    match parser_utils::ParserUtils::extract_component_from_uri(&file) {
-                        Ok(c) => c,
-                        Err(err) => {
-                            error!("error extracting component info from uri; got: {err}");
-
-                            return None;
-                        }
-                    };
-
-                let repo_dest = parser_utils::ParserUtils::get_component_dest_dir(
-                    &self.cfg.cache_path,
-                    &component_info,
-                );
-
-                if let Ok(component) =
-                    parser_utils::ParserUtils::get_component(&repo_dest, &component_info.component)
-                {
-                    return store
-                        .keys()
-                        .find(|uri| uri.ends_with(&component.uri))
-                        .map(|uri| LSPLocation {
-                            uri: uri.clone(),
-                            range: Range {
-                                start: LSPPosition {
-                                    line: 0,
-                                    character: 0,
-                                },
-                                end: LSPPosition {
-                                    line: 0,
-                                    character: 0,
-                                },
+                self.components
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .find(|c| c.uri == component_uri)
+                    .map(|c| LSPLocation {
+                        uri: c.local_path.clone(),
+                        range: Range {
+                            start: LSPPosition {
+                                line: 0,
+                                character: 0,
                             },
-                        });
-                }
-
-                error!("could not find component for: {file}; at: {repo_dest}");
-                None
+                            end: LSPPosition {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                    })
             }
             IncludeInformation {
                 local: None,
@@ -537,6 +529,15 @@ impl LSPHandlers {
             parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
             parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
             parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
+            parser::PositionType::Include(IncludeInformation {
+                remote: None,
+                remote_url: None,
+                local: None,
+                basic: None,
+                component: Some(component),
+            }) => self
+                .on_completion_component(line, position, &component)
+                .ok()?,
             parser::PositionType::RuleReference(_) => {
                 self.on_completion_rule_reference(line, position).ok()?
             }
@@ -626,7 +627,7 @@ impl LSPHandlers {
                 |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
                     Ok(LSPCompletion {
                         label: node_key.to_string(),
-                        details: Some(node_description.to_string()),
+                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
                         location: LSPLocation {
                             range: Range {
                                 start: LSPPosition {
@@ -727,7 +728,7 @@ impl LSPHandlers {
                 |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
                     Ok(LSPCompletion {
                         label: node_key.clone(),
-                        details: Some(node_description.clone()),
+                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
                         location: LSPLocation {
                             range: Range {
                                 start: LSPPosition {
@@ -776,7 +777,7 @@ impl LSPHandlers {
                 |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
                     Ok(LSPCompletion {
                         label: node_key.clone(),
-                        details: Some(node_description.clone()),
+                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
                         location: LSPLocation {
                             range: Range {
                                 start: LSPPosition {
@@ -808,6 +809,7 @@ impl LSPHandlers {
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
         let mut all_variables = self.variables.lock().unwrap();
+        let mut all_components = self.components.lock().unwrap();
 
         info!("importing files from base");
         let base_uri = format!("{}base", self.cfg.cache_path);
@@ -840,6 +842,11 @@ impl LSPHandlers {
                 for variable in results.variables {
                     info!("found variable: {:?}", &variable);
                     all_variables.insert(variable.key.clone(), variable);
+                }
+
+                for component in results.components {
+                    info!("found component: {:?}", &component);
+                    all_components.insert(component.uri.clone(), component);
                 }
             }
         }
@@ -895,6 +902,11 @@ impl LSPHandlers {
             for variable in results.variables {
                 info!("found variable: {:?}", &variable);
                 all_variables.insert(variable.key.clone(), variable);
+            }
+
+            for component in results.components {
+                info!("found component: {:?}", &component);
+                all_components.insert(component.uri.clone(), component);
             }
         }
 
@@ -1083,5 +1095,72 @@ impl LSPHandlers {
             id: request.id,
             locations: references,
         }))
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn on_completion_component(
+        &self,
+        line: &str,
+        position: Position,
+        component: &Component,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        if !component.inputs.iter().any(|i| i.hovered) {
+            return Ok(vec![]);
+        }
+
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace(),
+        );
+
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace() || c == ':'
+            });
+
+        let components_store = self.components.lock().unwrap();
+        let Some(component_spec) = components_store.get(&component.uri) else {
+            warn!(
+                "could not find component spec; indexing went wrong!; searching for {}",
+                component.uri
+            );
+
+            return Ok(vec![]);
+        };
+
+        // filter out those that were already used
+        let valid_input_autocompletes: Vec<super::ComponentInput> = component_spec
+            .inputs
+            .iter()
+            .filter(|&i| !component.inputs.iter().any(|ci| ci.key == i.key))
+            .cloned() // Clone each element to get an owned version
+            .collect();
+
+        let items = valid_input_autocompletes
+            .into_iter()
+            .filter(|i| i.key.starts_with(word))
+            .flat_map(|i| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: i.key.clone(),
+                    details: Some(i.autocomplete_details()),
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
+                            },
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
+                        },
+                        ..Default::default()
+                    },
+                })
+            })
+            .collect();
+
+        Ok(items)
     }
 }

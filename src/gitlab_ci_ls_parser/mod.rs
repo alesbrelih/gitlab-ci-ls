@@ -96,6 +96,7 @@ pub struct ParseResults {
     pub files: Vec<GitlabFile>,
     pub nodes: Vec<GitlabElement>,
     pub stages: Vec<GitlabElement>,
+    pub components: Vec<Component>,
     pub variables: Vec<GitlabElement>,
 }
 
@@ -116,17 +117,6 @@ pub struct RemoteInclude {
     pub project: Option<String>,
     pub reference: Option<String>,
     pub file: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct ComponentInput {
-    pub key: String,
-    pub hovered: bool,
-}
-#[derive(Debug, Default)]
-pub struct Component {
-    pub uri: Option<String>,
-    pub inputs: Vec<ComponentInput>,
 }
 
 impl RemoteInclude {
@@ -152,4 +142,71 @@ pub struct RuleReference {
 #[derive(Debug)]
 pub struct NodeDefinition {
     pub name: String,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ComponentInput {
+    pub key: String,
+    pub default: Option<serde_yaml::Value>,
+    pub description: Option<String>,
+    pub options: Option<Vec<String>>,
+    pub regex: Option<String>,
+    pub prop_type: Option<String>,
+    pub hovered: bool,
+}
+
+impl ComponentInput {
+    pub fn autocomplete_details(&self) -> String {
+        let mut details = String::new();
+
+        if let Some(d) = &self.description {
+            details = format!(
+                "## Description: 
+{d}
+"
+            );
+        }
+
+        if let Some(d) = &self.prop_type {
+            details = format!(
+                "{}
+## Type: 
+{}
+",
+                details,
+                d.as_str()
+            );
+        }
+
+        if let Some(d) = &self.default {
+            details = format!(
+                "{}
+## Default: 
+{}
+",
+                details,
+                d.as_str().unwrap_or_default()
+            );
+        }
+
+        if let Some(d) = &self.regex {
+            details = format!(
+                "{}
+## Regex: 
+{}
+",
+                details,
+                d.as_str()
+            );
+        }
+
+        details
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Component {
+    pub uri: String,
+    pub local_path: String,
+    pub inputs: Vec<ComponentInput>,
 }

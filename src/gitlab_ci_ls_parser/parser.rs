@@ -6,9 +6,33 @@ use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    fs_utils, git, parser_utils::ParserUtils, treesitter, GitlabElement, GitlabFile,
+    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabElement, GitlabFile,
     IncludeInformation, NodeDefinition, ParseResults, RuleReference,
 };
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpecInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default: Option<serde_yaml::Value>, // Can be any type (string, number, boolean)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    regex: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpecInputs {
+    inputs: HashMap<String, ComponentSpecInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpec {
+    spec: ComponentSpecInputs,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct IncludeNode {
@@ -22,7 +46,7 @@ enum IncludeItem {
     Local(Local),
     Remote(Remote),
     Basic(String),
-    Component(Component),
+    Component(ComponentInclude),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,8 +64,8 @@ struct Local {
     local: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Component {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ComponentInclude {
     component: String,
     inputs: HashMap<String, String>,
 }
@@ -296,6 +320,80 @@ impl ParserImpl {
 
         None
     }
+
+    fn parse_component(
+        &self,
+        parse_results: &mut ParseResults,
+        component_id: &str,
+    ) -> anyhow::Result<()> {
+        let component_info = match ParserUtils::extract_component_from_uri(component_id) {
+            Ok(c) => c,
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "error extracting component info from uri; got: {err}"
+                ));
+            }
+        };
+
+        let gitlab_component = match self.git.fetch_remote_component(component_info.clone()) {
+            Ok(c) => c,
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "could not find gitlab component: {:?}; got err: {err}",
+                    component_info
+                ));
+            }
+        };
+
+        let p = &gitlab_component.uri["file://".len()..];
+        let spec_content = match std::fs::read_to_string(p) {
+            Ok(s) => s,
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "could not read gitlab component: {:?}, got err: {err}",
+                    p,
+                ));
+            }
+        };
+
+        // TODO: probably it is valid to have no inputs?
+        let Some(spec_inputs) = self.treesitter.get_component_spec_inputs(&spec_content) else {
+            return Err(anyhow::anyhow!("could not get spec inputs from component"));
+        };
+
+        let spec: ComponentSpec = match serde_yaml::from_str(&spec_inputs) {
+            Ok(y) => y,
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "error parsing yaml: {}, got err: {}",
+                    &spec_content,
+                    err
+                ));
+            }
+        };
+
+        parse_results.components.push(Component {
+            uri: component_id.to_string(),
+            local_path: gitlab_component.uri,
+            inputs: spec
+                .spec
+                .inputs
+                .into_iter()
+                .map(|i| crate::gitlab_ci_ls_parser::ComponentInput {
+                    key: i.0,
+                    default: i.1.default,
+                    regex: i.1.regex,
+                    options: i.1.options,
+                    prop_type: i.1.type_,
+                    description: i.1.description,
+
+                    ..Default::default()
+                })
+                .collect(),
+        });
+
+        Ok(())
+    }
 }
 
 impl Parser for ParserImpl {
@@ -324,12 +422,14 @@ impl Parser for ParserImpl {
         let files: Vec<GitlabFile> = vec![];
         let nodes: Vec<GitlabElement> = vec![];
         let stages: Vec<GitlabElement> = vec![];
+        let components: Vec<Component> = vec![];
         let variables: Vec<GitlabElement> = vec![];
 
         let mut parse_results = ParseResults {
             files,
             nodes,
             stages,
+            components,
             variables,
         };
 
@@ -427,24 +527,8 @@ impl Parser for ParserImpl {
                         self.parse_remote_files(parse_results, &remote_files);
                     }
                     IncludeItem::Component(node) => {
-                        let component_info =
-                            match ParserUtils::extract_component_from_uri(&node.component) {
-                                Ok(c) => c,
-                                Err(err) => {
-                                    error!("error extracting component info from uri; got: {err}");
-
-                                    continue;
-                                }
-                            };
-
-                        let gitlab_component = self.git.fetch_remote_component(component_info);
-                        if let Ok(element) = gitlab_component {
-                            parse_results.files.push(GitlabFile {
-                                path: element.uri,
-                                content: element.content.unwrap_or_default(),
-                            });
-                        } else {
-                            error!("could not find gitlab component: {:?}", gitlab_component);
+                        if let Err(err) = self.parse_component(parse_results, &node.component) {
+                            error!("error handling component; got err: {err}");
                         }
                     }
                 }

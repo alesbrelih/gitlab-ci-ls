@@ -40,6 +40,7 @@ pub trait Treesitter {
         variable_name: &str,
         job_name: &str,
     ) -> Option<GitlabElement>;
+    fn get_component_spec_inputs(&self, content: &str) -> Option<String>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -52,7 +53,7 @@ impl TreesitterImpl {
     }
 
     fn get_position_type_component(
-        mat: tree_sitter::QueryMatch<'_, '_>,
+        mat: &tree_sitter::QueryMatch<'_, '_>,
         position: Position,
         content: &str,
         full_component_index: u32,
@@ -80,19 +81,26 @@ impl TreesitterImpl {
             for c in mat.captures {
                 match c.index {
                     idx if idx == component_uri_index => {
-                        component.uri = Some(content[c.node.byte_range()].to_string());
+                        component.uri = content[c.node.byte_range()].to_string();
                     }
                     idx if idx == component_input_index => {
                         let key = content[c.node.byte_range()].to_string();
-                        let hovered = c.node.start_position().row == position.line as usize;
+                        let hovered = c.node.start_position().row == position.line as usize
+                            && position.character as usize >= c.node.start_position().column
+                            && position.character as usize <= c.node.end_position().column;
 
-                        inputs.push(ComponentInput { key, hovered });
+                        inputs.push(ComponentInput {
+                            key,
+                            hovered,
+                            ..Default::default()
+                        });
                     }
                     _ => continue,
                 };
             }
 
             component.inputs = inputs;
+
             return Some(parser::PositionType::Include(IncludeInformation {
                 remote: None,
                 remote_url: None,
@@ -489,7 +497,7 @@ impl Treesitter for TreesitterImpl {
             // If its component
             if mat.captures.iter().any(|c| c.index == full_component_index) {
                 if let Some(position_type) = TreesitterImpl::get_position_type_component(
-                    mat,
+                    &mat,
                     position,
                     content,
                     full_component_index,
@@ -761,6 +769,36 @@ impl Treesitter for TreesitterImpl {
                     },
                 }
             })
+    }
+
+    fn get_component_spec_inputs(&self, content: &str) -> Option<String> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::language(),
+            &TreesitterQueries::get_component_spec_inputs(),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let spec_index = query.capture_index_for_name("spec").unwrap();
+
+        for mat in matches {
+            for c in mat.captures {
+                if c.index == spec_index {
+                    return Some(content[c.node.byte_range()].to_string());
+                }
+            }
+        }
+
+        None
     }
 }
 

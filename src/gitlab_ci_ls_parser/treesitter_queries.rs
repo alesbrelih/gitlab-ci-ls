@@ -637,4 +637,23 @@ impl TreesitterQueries {
         "#
         )
     }
+
+    pub fn get_component_spec_inputs() -> String {
+        r#"
+           (
+               stream(
+                   document(
+                       block_node(
+                           block_mapping(
+                               block_mapping_pair
+                               key: (flow_node(plain_scalar(string_scalar)@key))
+                           )
+                       )
+                   ) @spec
+               )
+               (#eq? @key "spec")
+           )
+           "#
+        .to_string()
+    }
 }
