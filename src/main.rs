@@ -145,7 +145,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             vec![]
         }
     };
-    error!("remote_ursl: {:?}", remote_urls);
 
     if let Err(err) = save_base_files(&init_params, &fs_utils) {
         error!("error saving base files; got err: {err}");
@@ -188,14 +187,8 @@ fn get_git_remotes(root_path: &str) -> anyhow::Result<Vec<String>> {
     let mut remotes = std::str::from_utf8(&output.stdout)
         .unwrap()
         .lines()
-        .filter_map(|l| {
-            let parts = l.split_whitespace().collect::<Vec<&str>>();
-            if parts.len() == 3 {
-                get_remote_hosts(parts[1])
-            } else {
-                None
-            }
-        })
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .filter_map(get_remote_hosts)
         .collect::<Vec<String>>();
 
     remotes.dedup();
