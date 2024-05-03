@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use git2::Repository;
 use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -14,6 +13,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::process::Command;
 
 use crate::gitlab_ci_ls_parser::fs_utils::{FSUtils, FSUtilsImpl};
 use crate::gitlab_ci_ls_parser::messages;
@@ -135,40 +135,17 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         LevelFilter::Warn,
     )?;
 
-    let root_path = fs_utils.get_path(&init_params.root_path);
-    let repository: Option<git2::Repository> = match Repository::open(&root_path) {
-        Ok(repo) => Some(repo),
+    let remote_urls = match get_git_remotes(&init_params.root_path) {
+        Ok(u) => u,
         Err(err) => {
             error!(
-                "could not open repository: {:?}; got err: {}",
-                &root_path, err
+                "error getting git remotes at: {}; got err: {:?}",
+                &init_params.root_path, err
             );
-
-            None
+            vec![]
         }
     };
-
-    let mut remote_urls = vec![];
-    if let Some(repo) = repository {
-        let remotes = match repo.remotes() {
-            Ok(r) => Some(r),
-            Err(err) => {
-                error!("could not list remotes; got err: {}", err);
-
-                None
-            }
-        };
-
-        if let Some(remotes) = remotes {
-            remote_urls = remotes
-                .iter()
-                .flatten()
-                .flat_map(|r_name| repo.find_remote(r_name))
-                .filter_map(|remote| remote.url().map(std::string::ToString::to_string))
-                .filter_map(|remote| get_remote_hosts(remote.as_str()))
-                .collect();
-        }
-    }
+    error!("remote_ursl: {:?}", remote_urls);
 
     if let Err(err) = save_base_files(&init_params, &fs_utils) {
         error!("error saving base files; got err: {err}");
@@ -196,6 +173,36 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
+fn get_git_remotes(root_path: &str) -> anyhow::Result<Vec<String>> {
+    let output = Command::new("git")
+        .args(["-C", root_path, "remote", "-v"])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "error listing remotes: {:?}",
+            std::str::from_utf8(&output.stderr)
+        ));
+    }
+
+    let mut remotes = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|l| {
+            let parts = l.split_whitespace().collect::<Vec<&str>>();
+            if parts.len() == 3 {
+                get_remote_hosts(parts[1])
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>();
+
+    remotes.dedup();
+
+    Ok(remotes)
+}
+
 fn save_base_files(
     init_params: &InitializationParams,
     fs_utils: &FSUtilsImpl,
@@ -220,7 +227,7 @@ fn save_base_files(
 }
 
 fn get_remote_hosts(remote: &str) -> Option<String> {
-    let re = Regex::new(r"^(ssh://)?([^:/]+@[^:/]+(?::\d+)?[:/])").expect("Invalid REGEX");
+    let re = Regex::new(r"^(ssh://)?([^:\s/]+@[^:/]+(?::\d+)?[:/])").expect("Invalid REGEX");
     let captures = re.captures(remote)?;
 
     Some(captures[0].to_string())
