@@ -101,3 +101,4 @@ configuration.
 - [x] Support !reference
 - [x] Handle default keyword
 - [ ] Handle components
+- [ ] Push diagnostics, instead of pull based
