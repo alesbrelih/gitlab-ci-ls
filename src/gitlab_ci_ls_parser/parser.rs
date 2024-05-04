@@ -6,8 +6,8 @@ use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabElement, GitlabFile,
-    IncludeInformation, NodeDefinition, ParseResults, RuleReference,
+    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabComponentElement,
+    GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults, RuleReference,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,6 +88,7 @@ pub trait Parser {
         content: &str,
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
+    fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
@@ -408,6 +409,10 @@ impl Parser for ParserImpl {
 
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement> {
         self.treesitter.get_all_stages(uri, content, stage)
+    }
+
+    fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement> {
+        self.treesitter.get_all_components(uri, content)
     }
 
     fn get_position_type(&self, content: &str, position: Position) -> PositionType {

@@ -108,17 +108,31 @@ impl TreesitterQueries {
         format!(
             r#"
         (
-            block_mapping_pair
-                key: (
-                    flow_node(
-                        plain_scalar(string_scalar) @key
+            document (
+                block_node (
+                    block_mapping (
+                        block_mapping_pair
+                            value: (
+                                block_node (
+                                    block_mapping (
+                                        block_mapping_pair
+                                            key: (
+                                                flow_node(
+                                                    plain_scalar(string_scalar) @key
+                                                )
+                                            )
+                                            value: (
+                                                flow_node(
+                                                    plain_scalar(string_scalar) @value
+                                                )
+                                            )
+
+                                    )
+                                )
+                            )
                     )
                 )
-                value: (
-                    flow_node(
-                        plain_scalar(string_scalar) @value
-                    )
-                )
+            )
             (#eq? @key "stage")
             {search}
         )
@@ -654,6 +668,33 @@ impl TreesitterQueries {
                (#eq? @key "spec")
            )
            "#
+        .to_string()
+    }
+
+    pub fn get_all_components() -> String {
+        r#"
+        (
+            block_sequence_item(
+                block_node(
+                    block_mapping(
+                        (block_mapping_pair
+                            key: (flow_node(plain_scalar(string_scalar)@component_include_key))
+                            value: (flow_node) @component_uri
+                        )
+                        (block_mapping_pair
+                            key: (flow_node(plain_scalar(string_scalar)@component_inputs_key))
+                            value: (block_node(block_mapping(
+                              block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@component_input))
+                            )*))
+                        )
+                    )
+                ) @full_component
+            )
+            (#eq? @component_include_key "component")
+            (#eq? @component_inputs_key "inputs")
+        )
+        "#
         .to_string()
     }
 }

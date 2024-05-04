@@ -7,8 +7,8 @@ use tree_sitter::{Query, QueryCursor};
 use super::{
     parser::{self},
     treesitter_queries::TreesitterQueries,
-    Component, ComponentInput, GitlabElement, Include, IncludeInformation, LSPPosition,
-    NodeDefinition, Range, RemoteInclude, RuleReference,
+    Component, ComponentInput, GitlabComponentElement, GitlabElement, Include, IncludeInformation,
+    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -17,6 +17,7 @@ pub trait Treesitter {
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
+    fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_all_extends(
         &self,
@@ -799,6 +800,80 @@ impl Treesitter for TreesitterImpl {
         }
 
         None
+    }
+
+    fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::language(),
+            &TreesitterQueries::get_all_components(),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
+        let component_input_index = query.capture_index_for_name("component_input").unwrap();
+        let full_component_index = query.capture_index_for_name("full_component").unwrap();
+
+        let mut components = vec![];
+        for m in matches {
+            let mut node = GitlabComponentElement {
+                uri: uri.to_string(),
+                ..Default::default()
+            };
+            for c in m.captures {
+                let text = content[c.node.byte_range()].to_string();
+                match c.index {
+                    idx if idx == component_uri_index => {
+                        node.key = text;
+                    }
+                    idx if idx == full_component_index => {
+                        node.content = Some(text);
+                        node.range = Range {
+                            start: LSPPosition {
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
+                            },
+                            end: LSPPosition {
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
+                            },
+                        };
+                    }
+                    idx if idx == component_input_index => node.inputs.push(GitlabElement {
+                        uri: uri.to_string(),
+                        content: Some(text.clone()),
+                        key: text,
+                        range: Range {
+                            start: LSPPosition {
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
+                            },
+                            end: LSPPosition {
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
+                            },
+                        },
+                    }),
+                    _ => {}
+                }
+            }
+
+            components.push(node);
+        }
+
+        components
     }
 }
 

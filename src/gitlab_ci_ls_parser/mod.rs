@@ -91,6 +91,15 @@ pub struct GitlabElement {
     pub range: Range,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct GitlabComponentElement {
+    pub key: String,
+    pub content: Option<String>,
+    pub uri: String,
+    pub range: Range,
+    pub inputs: Vec<GitlabElement>,
+}
+
 #[derive(Debug)]
 pub struct ParseResults {
     pub files: Vec<GitlabFile>,

@@ -925,6 +925,7 @@ impl LSPHandlers {
         None
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn on_diagnostic(&self, request: Request) -> Option<LSPResult> {
         let start = Instant::now();
         let params = serde_json::from_value::<DocumentDiagnosticParams>(request.params).ok()?;
@@ -1015,6 +1016,35 @@ impl LSPHandlers {
                 },
                 format!("Job: {} does not exist.", need.key),
             ));
+        }
+
+        let components = self
+            .parser
+            .get_all_components(params.text_document.uri.as_str(), content.as_str());
+
+        let all_components = self.components.lock().unwrap();
+        for component in components {
+            if let Some(spec) = all_components.get(&component.key) {
+                component
+                    .inputs
+                    .into_iter()
+                    .filter(|i| Option::is_none(&spec.inputs.iter().find(|si| si.key == i.key)))
+                    .for_each(|i| {
+                        diagnostics.push(Diagnostic::new_simple(
+                            lsp_types::Range {
+                                start: lsp_types::Position {
+                                    line: i.range.start.line,
+                                    character: i.range.start.character,
+                                },
+                                end: lsp_types::Position {
+                                    line: i.range.end.line,
+                                    character: i.range.end.character,
+                                },
+                            },
+                            format!("Input: {} does not exist.", i.key),
+                        ));
+                    });
+            }
         }
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
