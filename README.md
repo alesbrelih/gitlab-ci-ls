@@ -29,9 +29,10 @@ Initialization options:
 
 ## Installation
 
-1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com).
+1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com/alesbrelih/gitlab-ci-ls/releases).
 2. **Homebrew (macOS)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
 3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
+4. **Mason (neovim)**: [Github](https://github.com/williamboman/mason.nvim)
 
 ## Build from source
 
@@ -43,9 +44,7 @@ Executable can then be found at _target/release/gitlab-ci-ls_
 
 ## Integration with Neovim
 
-Currently this tool isn't available on Mason [yet](https://github.com/mason-org/mason-registry/pull/5256).
-
-But you can still use `nvim-lspconfig` to use it. More can be read [here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#gitlab_ci_ls).
+Easiest way to use this using neovim is to install it using [mason](https://github.com/williamboman/mason.nvim) with combination of [mason-lspconfig](https://github.com/williamboman/mason-lspconfig.nvim).
 
 **Important**: To use it now you will have to set correct file type. Before it was attached on
 `yaml` file types, but I have decided that it brings too much confusion.
