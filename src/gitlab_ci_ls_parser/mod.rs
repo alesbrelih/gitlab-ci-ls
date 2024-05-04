@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lsp_server::RequestId;
-use lsp_types::Diagnostic;
+use lsp_types::{Diagnostic, Url};
 
 pub mod fs_utils;
 pub mod git;
@@ -62,8 +62,8 @@ pub struct HoverResult {
 }
 
 #[derive(Debug)]
-pub struct DiagnosticsResult {
-    pub id: RequestId,
+pub struct DiagnosticsNotification {
+    pub uri: Url,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -72,7 +72,7 @@ pub enum LSPResult {
     Hover(HoverResult),
     Completion(CompletionResult),
     Definition(DefinitionResult),
-    Diagnostics(DiagnosticsResult),
+    Diagnostics(DiagnosticsNotification),
     References(ReferencesResult),
     Error(anyhow::Error),
 }

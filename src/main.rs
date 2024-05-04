@@ -5,10 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use lsp_server::Connection;
-use lsp_types::{
-    DiagnosticServerCapabilities, DocumentFilter, ServerCapabilities, TextDocumentSyncKind,
-    WorkDoneProgressOptions,
-};
+use lsp_types::{ServerCapabilities, TextDocumentSyncKind, WorkDoneProgressOptions};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -87,27 +84,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             all_commit_characters: None,
             completion_item: None,
         }),
-        diagnostic_provider: Some(DiagnosticServerCapabilities::RegistrationOptions(
-            lsp_types::DiagnosticRegistrationOptions {
-                diagnostic_options: lsp_types::DiagnosticOptions {
-                    work_done_progress_options: WorkDoneProgressOptions {
-                        work_done_progress: None,
-                    },
-                    identifier: None,
-                    workspace_diagnostics: false,
-                    inter_file_dependencies: true,
-                },
-                static_registration_options: lsp_types::StaticRegistrationOptions { id: None },
-                text_document_registration_options: lsp_types::TextDocumentRegistrationOptions {
-                    document_selector: Some(vec![DocumentFilter {
-                        pattern: Some(String::from("*gitlab-ci*")),
-                        scheme: Some("file".into()),
-                        language: Some("yaml".into()),
-                    }]),
-                },
-            },
-        )),
-
         ..Default::default()
     })?;
 

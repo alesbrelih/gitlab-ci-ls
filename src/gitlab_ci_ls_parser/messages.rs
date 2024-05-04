@@ -3,17 +3,16 @@ use std::process::exit;
 use log::{error, info, warn};
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit,
-    FullDocumentDiagnosticReport, Hover, HoverContents, LocationLink, MarkedString, MarkupContent,
-    Position, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit, Hover, HoverContents,
+    LocationLink, MarkedString, MarkupContent, Position, TextEdit,
 };
 use reqwest::Url;
 
 use crate::gitlab_ci_ls_parser::LSPResult;
 
 use super::{
-    handlers::LSPHandlers, CompletionResult, DefinitionResult, DiagnosticsResult, HoverResult,
-    ReferencesResult,
+    handlers::LSPHandlers, CompletionResult, DefinitionResult, DiagnosticsNotification,
+    HoverResult, ReferencesResult,
 };
 
 pub struct Messages {
@@ -53,7 +52,6 @@ impl Messages {
                 "textDocument/definition" => self.events.on_definition(request),
                 "textDocument/references" => self.events.on_references(request),
                 "textDocument/completion" => self.events.on_completion(request),
-                "textDocument/diagnostic" => self.events.on_diagnostic(request),
                 "shutdown" => {
                     error!("SHUTDOWN!!");
                     exit(0);
@@ -254,14 +252,14 @@ fn references(result: ReferencesResult) -> Message {
     })
 }
 
-fn diagnostics(result: DiagnosticsResult) -> Message {
-    Message::Response(Response {
-        id: result.id,
-        result: serde_json::to_value(FullDocumentDiagnosticReport {
-            items: result.diagnostics,
-            ..Default::default()
+fn diagnostics(notification: DiagnosticsNotification) -> Message {
+    Message::Notification(lsp_server::Notification {
+        method: "textDocument/publishDiagnostics".to_string(),
+        params: serde_json::to_value(lsp_types::PublishDiagnosticsParams {
+            uri: notification.uri,
+            diagnostics: notification.diagnostics,
+            version: None,
         })
-        .ok(),
-        error: None,
+        .unwrap(),
     })
 }

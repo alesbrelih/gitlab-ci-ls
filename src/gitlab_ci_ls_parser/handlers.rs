@@ -1,18 +1,19 @@
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Instant};
 
 use anyhow::anyhow;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams, HoverParams,
-    Position, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position, Url,
 };
+
+use crate::gitlab_ci_ls_parser::DiagnosticsNotification;
 
 use super::{
     fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, DefinitionResult,
-    DiagnosticsResult, GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig,
-    LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult, RuleReference,
+    GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig, LSPLocation,
+    LSPPosition, LSPResult, Range, ReferencesResult, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -233,9 +234,15 @@ impl LSPHandlers {
             }
         }
 
-        debug!("finished searching");
+        info!("finished searching");
 
-        None
+        // releasing lock because generate diagnostics grabs it
+        // and is used in two places
+        drop(store);
+        drop(all_nodes);
+        drop(all_stages);
+
+        self.generate_diagnostics(params.text_document.uri)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -915,37 +922,22 @@ impl LSPHandlers {
         Ok(())
     }
 
-    #[allow(clippy::unused_self)]
-    pub fn on_save(&self, notification: Notification) -> Option<LSPResult> {
-        let _params =
-            serde_json::from_value::<DidSaveTextDocumentParams>(notification.params).ok()?;
-
-        // PUBLISH DIAGNOSTICS
-
-        None
-    }
-
     #[allow(clippy::too_many_lines)]
-    pub fn on_diagnostic(&self, request: Request) -> Option<LSPResult> {
+    fn generate_diagnostics(&self, document_uri: lsp_types::Url) -> Option<LSPResult> {
         let start = Instant::now();
-        let params = serde_json::from_value::<DocumentDiagnosticParams>(request.params).ok()?;
         let store = self.store.lock().unwrap();
         let all_nodes = self.nodes.lock().unwrap();
 
-        let content: String = store
-            .get(&params.text_document.uri.to_string())?
-            .to_string();
+        let content: String = store.get(&document_uri.to_string())?.to_string();
 
-        let extends = self.parser.get_all_extends(
-            params.text_document.uri.to_string(),
-            content.as_str(),
-            None,
-        );
+        let extends = self
+            .parser
+            .get_all_extends(document_uri.to_string(), content.as_str(), None);
 
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         'extend: for extend in extends {
-            if extend.uri == params.text_document.uri.to_string() {
+            if extend.uri == document_uri.to_string() {
                 for (_, root_nodes) in all_nodes.iter() {
                     if root_nodes.get(&extend.key).is_some() {
                         continue 'extend;
@@ -968,9 +960,9 @@ impl LSPHandlers {
             }
         }
 
-        let stages =
-            self.parser
-                .get_all_stages(params.text_document.uri.as_str(), content.as_str(), None);
+        let stages = self
+            .parser
+            .get_all_stages(document_uri.as_ref(), content.as_str(), None);
 
         let all_stages = self.stages.lock().unwrap();
         for stage in stages {
@@ -991,11 +983,9 @@ impl LSPHandlers {
             }
         }
 
-        let needs = self.parser.get_all_job_needs(
-            params.text_document.uri.to_string(),
-            content.as_str(),
-            None,
-        );
+        let needs = self
+            .parser
+            .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
 
         'needs: for need in needs {
             for (_, node) in all_nodes.iter() {
@@ -1020,7 +1010,7 @@ impl LSPHandlers {
 
         let components = self
             .parser
-            .get_all_components(params.text_document.uri.as_str(), content.as_str());
+            .get_all_components(document_uri.as_ref(), content.as_str());
 
         let all_components = self.components.lock().unwrap();
         for component in components {
@@ -1048,10 +1038,17 @@ impl LSPHandlers {
         }
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
-        Some(LSPResult::Diagnostics(DiagnosticsResult {
-            id: request.id,
+        Some(LSPResult::Diagnostics(DiagnosticsNotification {
+            uri: document_uri,
             diagnostics,
         }))
+    }
+
+    pub fn on_save(&self, notification: Notification) -> Option<LSPResult> {
+        let params =
+            serde_json::from_value::<DidSaveTextDocumentParams>(notification.params).ok()?;
+
+        self.generate_diagnostics(params.text_document.uri)
     }
 
     pub fn on_references(&self, request: Request) -> Option<LSPResult> {
