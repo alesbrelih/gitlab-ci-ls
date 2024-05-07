@@ -100,5 +100,5 @@ configuration.
 - [ ] Variables can be set in matrixes as well, this is relevant for go to definition on variable.
 - [x] Support !reference
 - [x] Handle default keyword
-- [ ] Handle components
-- [ ] Push diagnostics, instead of pull based
+- [x] Handle components
+- [x] Push diagnostics, instead of pull based
