@@ -437,6 +437,8 @@ impl TreesitterQueries {
             )
         "#;
 
+        // component_input_error is when user start typing new key and its an error because it
+        // needs to be a map
         let search_component_include = r#"
         (
             block_sequence_item(
@@ -448,15 +450,20 @@ impl TreesitterQueries {
                         )
                         (block_mapping_pair
                             key: (flow_node(plain_scalar(string_scalar)@component_inputs_key))
-                            value: (block_node(block_mapping(
-                              block_mapping_pair
-                                key: (flow_node(plain_scalar(string_scalar)@component_input))
-                                value:
-                                [
-                                    (flow_node)@component_input_value_plain
-                                    (block_node)@component_input_value_block
-                                ]?
-                            )*))
+                            value: (block_node(block_mapping
+                            [
+                                (
+                                  block_mapping_pair
+                                    key: (flow_node(plain_scalar(string_scalar)@component_input))
+                                    value:
+                                    [
+                                        (flow_node)@component_input_value_plain
+                                        (block_node)@component_input_value_block
+                                    ]?
+                                )*
+                                (ERROR(flow_node(plain_scalar(string_scalar)@component_input_error)))*
+                            ]
+                            ))
                         )
                     )
                 ) @full_component

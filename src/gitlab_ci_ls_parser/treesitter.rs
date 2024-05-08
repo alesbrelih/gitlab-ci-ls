@@ -63,6 +63,7 @@ impl TreesitterImpl {
         component_input_index: u32,
         component_input_value_plain_index: u32,
         component_input_value_block_index: u32,
+        component_input_error: u32,
     ) -> Option<parser::PositionType> {
         let mut component = Component {
             ..Default::default()
@@ -99,6 +100,18 @@ impl TreesitterImpl {
                             && position.character as usize <= c.node.end_position().column;
 
                         input = Some(ComponentInput {
+                            key,
+                            hovered,
+                            ..Default::default()
+                        });
+                    }
+                    idx if idx == component_input_error => {
+                        let key = content[c.node.byte_range()].to_string();
+                        let hovered = c.node.start_position().row == position.line as usize
+                            && position.character as usize >= c.node.start_position().column
+                            && position.character as usize <= c.node.end_position().column;
+
+                        inputs.push(ComponentInput {
                             key,
                             hovered,
                             ..Default::default()
@@ -517,6 +530,9 @@ impl Treesitter for TreesitterImpl {
             .unwrap();
         let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
         let component_input_index = query.capture_index_for_name("component_input").unwrap();
+        let component_input_error_index = query
+            .capture_index_for_name("component_input_error")
+            .unwrap();
         let component_input_value_plain_index = query
             .capture_index_for_name("component_input_value_plain")
             .unwrap();
@@ -546,6 +562,7 @@ impl Treesitter for TreesitterImpl {
                     component_input_index,
                     component_input_value_plain_index,
                     component_input_value_block_index,
+                    component_input_error_index,
                 ) {
                     return position_type;
                 }

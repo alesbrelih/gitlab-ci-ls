@@ -372,7 +372,7 @@ impl ParserImpl {
             Ok(y) => y,
             Err(err) => {
                 return Err(anyhow::anyhow!(
-                    "error parsing yaml: {}, got err: {}",
+                    "error parsing component spec yaml: {}, got err: {}",
                     &spec_content,
                     err
                 ));
@@ -494,7 +494,7 @@ impl Parser for ParserImpl {
                         &element.content?, err
                     );
 
-                    return None;
+                    return Some(());
                 }
             };
 
