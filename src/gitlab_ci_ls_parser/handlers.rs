@@ -7,6 +7,7 @@ use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position, Url,
 };
+use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::DiagnosticsNotification;
 
@@ -1273,9 +1274,10 @@ fn generate_component_diagnostics_from_spec(
     spec_definition: &ComponentInput,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some(options) = &spec_definition.options {
-        if let Some(input_value_element) = &i.value_plain {
-            if let Some(input_value) = &input_value_element.content {
+    if let Some(input_value_element) = &i.value_plain {
+        if let Some(input_value) = &input_value_element.content {
+            // check options
+            if let Some(options) = &spec_definition.options {
                 if !options.contains(input_value) {
                     diagnostics.push(Diagnostic::new_simple(
                         lsp_types::Range {
@@ -1295,23 +1297,43 @@ fn generate_component_diagnostics_from_spec(
                     ));
                 }
             }
-        } else {
-            diagnostics.push(Diagnostic::new_simple(
-                lsp_types::Range {
-                    start: lsp_types::Position {
-                        line: i.range.start.line,
-                        character: i.range.start.character,
-                    },
-                    end: lsp_types::Position {
-                        line: i.range.end.line,
-                        character: i.range.end.character,
-                    },
-                },
-                format!(
-                    "No value. Value needs to be one of: '{}'.",
-                    options.join(", ")
-                ),
-            ));
+
+            // check if it matches to the spec pattern
+            if let Some(pattern) = &spec_definition.regex {
+                if let Ok(regex) = Regex::new(pattern.trim_matches('/')) {
+                    if !regex.is_match(input_value) {
+                        diagnostics.push(Diagnostic::new_simple(
+                            lsp_types::Range {
+                                start: lsp_types::Position {
+                                    line: input_value_element.range.start.line,
+                                    character: input_value_element.range.start.character,
+                                },
+                                end: lsp_types::Position {
+                                    line: input_value_element.range.end.line,
+                                    character: input_value_element.range.end.character,
+                                },
+                            },
+                            format!("Invalid value. Value needs to match the pattern: {pattern}"),
+                        ));
+                    }
+                } else {
+                    error!("could not parse regex from input spec regex: {pattern}");
+                }
+            }
         }
+    } else {
+        diagnostics.push(Diagnostic::new_simple(
+            lsp_types::Range {
+                start: lsp_types::Position {
+                    line: i.range.start.line,
+                    character: i.range.start.character,
+                },
+                end: lsp_types::Position {
+                    line: i.range.end.line,
+                    character: i.range.end.character,
+                },
+            },
+            "Missing value.".to_string(),
+        ));
     }
 }
