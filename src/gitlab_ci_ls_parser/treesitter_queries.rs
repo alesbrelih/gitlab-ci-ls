@@ -451,6 +451,11 @@ impl TreesitterQueries {
                             value: (block_node(block_mapping(
                               block_mapping_pair
                                 key: (flow_node(plain_scalar(string_scalar)@component_input))
+                                value:
+                                [
+                                    (flow_node)@component_input_value_plain
+                                    (block_node)@component_input_value_block
+                                ]?
                             )*))
                         )
                     )
@@ -686,6 +691,11 @@ impl TreesitterQueries {
                             value: (block_node(block_mapping(
                               block_mapping_pair
                                 key: (flow_node(plain_scalar(string_scalar)@component_input))
+                                value:
+                                [
+                                    (flow_node)@component_input_value_plain
+                                    (block_node)@component_input_value_block
+                                ]?
                             )*))
                         )
                     )

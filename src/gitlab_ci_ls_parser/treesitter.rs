@@ -5,10 +5,10 @@ use lsp_types::Position;
 use tree_sitter::{Query, QueryCursor};
 
 use super::{
-    parser::{self},
-    treesitter_queries::TreesitterQueries,
-    Component, ComponentInput, GitlabComponentElement, GitlabElement, Include, IncludeInformation,
-    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
+    parser, treesitter_queries::TreesitterQueries, Component, ComponentInput,
+    ComponentInputValueBlock, ComponentInputValuePlain, GitlabComponentElement, GitlabElement,
+    GitlabInputElement, Include, IncludeInformation, LSPPosition, NodeDefinition, Range,
+    RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -53,6 +53,7 @@ impl TreesitterImpl {
         Self {}
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn get_position_type_component(
         mat: &tree_sitter::QueryMatch<'_, '_>,
         position: Position,
@@ -60,6 +61,8 @@ impl TreesitterImpl {
         full_component_index: u32,
         component_uri_index: u32,
         component_input_index: u32,
+        component_input_value_plain_index: u32,
+        component_input_value_block_index: u32,
     ) -> Option<parser::PositionType> {
         let mut component = Component {
             ..Default::default()
@@ -79,25 +82,56 @@ impl TreesitterImpl {
             && full.node.end_position().row >= position.line as usize
         {
             let mut inputs = vec![];
+            let mut input = None;
             for c in mat.captures {
                 match c.index {
                     idx if idx == component_uri_index => {
                         component.uri = content[c.node.byte_range()].to_string();
                     }
                     idx if idx == component_input_index => {
+                        if let Some(i) = input {
+                            inputs.push(i);
+                        }
+
                         let key = content[c.node.byte_range()].to_string();
                         let hovered = c.node.start_position().row == position.line as usize
                             && position.character as usize >= c.node.start_position().column
                             && position.character as usize <= c.node.end_position().column;
 
-                        inputs.push(ComponentInput {
+                        input = Some(ComponentInput {
                             key,
                             hovered,
                             ..Default::default()
                         });
                     }
+                    idx if idx == component_input_value_plain_index => {
+                        if let Some(ref mut i) = input {
+                            let hovered = c.node.start_position().row == position.line as usize
+                                && position.character as usize >= c.node.start_position().column
+                                && position.character as usize <= c.node.end_position().column;
+
+                            let value = content[c.node.byte_range()].to_string();
+                            i.value_plain = ComponentInputValuePlain { value, hovered }
+                        }
+                    }
+                    idx if idx == component_input_value_block_index => {
+                        if let Some(ref mut i) = input {
+                            let hovered = c.node.start_position().row == position.line as usize
+                                && position.character as usize >= c.node.start_position().column
+                                && position.character as usize <= c.node.end_position().column;
+
+                            i.value_block = ComponentInputValueBlock {
+                                value: content[c.node.byte_range()].to_string(),
+                                hovered,
+                            }
+                        }
+                    }
                     _ => continue,
                 };
+            }
+
+            if let Some(i) = input {
+                inputs.push(i);
             }
 
             component.inputs = inputs;
@@ -483,6 +517,12 @@ impl Treesitter for TreesitterImpl {
             .unwrap();
         let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
         let component_input_index = query.capture_index_for_name("component_input").unwrap();
+        let component_input_value_plain_index = query
+            .capture_index_for_name("component_input_value_plain")
+            .unwrap();
+        let component_input_value_block_index = query
+            .capture_index_for_name("component_input_value_block")
+            .unwrap();
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
 
         for mat in matches {
@@ -504,6 +544,8 @@ impl Treesitter for TreesitterImpl {
                     full_component_index,
                     component_uri_index,
                     component_input_index,
+                    component_input_value_plain_index,
+                    component_input_value_block_index,
                 ) {
                     return position_type;
                 }
@@ -802,6 +844,7 @@ impl Treesitter for TreesitterImpl {
         None
     }
 
+    #[allow(clippy::too_many_lines)]
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
@@ -822,6 +865,16 @@ impl Treesitter for TreesitterImpl {
 
         let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
         let component_input_index = query.capture_index_for_name("component_input").unwrap();
+
+        // number/string
+        let component_input_value_plain_index = query
+            .capture_index_for_name("component_input_value_plain")
+            .unwrap();
+
+        let component_input_value_block_index = query
+            .capture_index_for_name("component_input_value_block")
+            .unwrap();
+
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
 
         let mut components = vec![];
@@ -830,6 +883,7 @@ impl Treesitter for TreesitterImpl {
                 uri: uri.to_string(),
                 ..Default::default()
             };
+            let mut current_input = None;
             for c in m.captures {
                 let text = content[c.node.byte_range()].to_string();
                 match c.index {
@@ -850,24 +904,81 @@ impl Treesitter for TreesitterImpl {
                             },
                         };
                     }
-                    idx if idx == component_input_index => node.inputs.push(GitlabElement {
-                        uri: uri.to_string(),
-                        content: Some(text.clone()),
-                        key: text,
-                        range: Range {
-                            start: LSPPosition {
-                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.start_position().column)
-                                    .unwrap_or(0),
+                    idx if idx == component_input_index => {
+                        if let Some(current) = current_input {
+                            node.inputs.push(current);
+                        }
+
+                        current_input = Some(GitlabInputElement {
+                            uri: uri.to_string(),
+                            content: Some(text.clone()),
+                            key: text,
+                            range: Range {
+                                start: LSPPosition {
+                                    line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                    character: u32::try_from(c.node.start_position().column)
+                                        .unwrap_or(0),
+                                },
+                                end: LSPPosition {
+                                    line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                    character: u32::try_from(c.node.end_position().column)
+                                        .unwrap_or(0),
+                                },
                             },
-                            end: LSPPosition {
-                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
-                            },
-                        },
-                    }),
+                            value_plain: None,
+                            value_block: None,
+                        });
+                    }
+                    idx if idx == component_input_value_plain_index => {
+                        if let Some(ref mut current) = current_input {
+                            current.value_plain = Some(GitlabElement {
+                                uri: uri.to_string(),
+                                content: Some(text.clone()),
+                                key: text,
+                                range: Range {
+                                    start: LSPPosition {
+                                        line: u32::try_from(c.node.start_position().row)
+                                            .unwrap_or(0),
+                                        character: u32::try_from(c.node.start_position().column)
+                                            .unwrap_or(0),
+                                    },
+                                    end: LSPPosition {
+                                        line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                        character: u32::try_from(c.node.end_position().column)
+                                            .unwrap_or(0),
+                                    },
+                                },
+                            });
+                        }
+                    }
+                    idx if idx == component_input_value_block_index => {
+                        if let Some(ref mut current) = current_input {
+                            current.value_block = Some(GitlabElement {
+                                uri: uri.to_string(),
+                                content: Some(text.clone()),
+                                key: text,
+                                range: Range {
+                                    start: LSPPosition {
+                                        line: u32::try_from(c.node.start_position().row)
+                                            .unwrap_or(0),
+                                        character: u32::try_from(c.node.start_position().column)
+                                            .unwrap_or(0),
+                                    },
+                                    end: LSPPosition {
+                                        line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                        character: u32::try_from(c.node.end_position().column)
+                                            .unwrap_or(0),
+                                    },
+                                },
+                            });
+                        }
+                    }
                     _ => {}
                 }
+            }
+
+            if let Some(current) = current_input {
+                node.inputs.push(current);
             }
 
             components.push(node);

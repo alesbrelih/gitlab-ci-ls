@@ -92,12 +92,24 @@ pub struct GitlabElement {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct GitlabInputElement {
+    pub key: String,
+    pub content: Option<String>,
+    pub uri: String,
+    pub range: Range,
+    pub value_plain: Option<GitlabElement>,
+    // not yet supported in logic because not sure what is actually supported
+    // and I don't want to overengineer from start
+    pub value_block: Option<GitlabElement>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct GitlabComponentElement {
     pub key: String,
     pub content: Option<String>,
     pub uri: String,
     pub range: Range,
-    pub inputs: Vec<GitlabElement>,
+    pub inputs: Vec<GitlabInputElement>,
 }
 
 #[derive(Debug)]
@@ -154,6 +166,18 @@ pub struct NodeDefinition {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct ComponentInputValuePlain {
+    value: String,
+    hovered: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ComponentInputValueBlock {
+    value: String,
+    hovered: bool,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct ComponentInput {
     pub key: String,
     pub default: Option<serde_yaml::Value>,
@@ -162,6 +186,8 @@ pub struct ComponentInput {
     pub regex: Option<String>,
     pub prop_type: Option<String>,
     pub hovered: bool,
+    pub value_plain: ComponentInputValuePlain,
+    pub value_block: ComponentInputValueBlock,
 }
 
 impl ComponentInput {

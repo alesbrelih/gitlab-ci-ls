@@ -64,10 +64,16 @@ struct Local {
     local: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)] // This attribute allows for different structs in the same Vec
+pub enum InputValue {
+    Plain(String),
+    Block(serde_yaml::Value),
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ComponentInclude {
     component: String,
-    inputs: HashMap<String, String>,
+    inputs: HashMap<String, InputValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -11,9 +11,10 @@ use lsp_types::{
 use crate::gitlab_ci_ls_parser::DiagnosticsNotification;
 
 use super::{
-    fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, DefinitionResult,
-    GitlabElement, HoverResult, IncludeInformation, LSPCompletion, LSPConfig, LSPLocation,
-    LSPPosition, LSPResult, Range, ReferencesResult, RuleReference,
+    fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, ComponentInput,
+    DefinitionResult, GitlabElement, GitlabInputElement, HoverResult, IncludeInformation,
+    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
+    RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -1015,11 +1016,18 @@ impl LSPHandlers {
         let all_components = self.components.lock().unwrap();
         for component in components {
             if let Some(spec) = all_components.get(&component.key) {
-                component
-                    .inputs
-                    .into_iter()
-                    .filter(|i| Option::is_none(&spec.inputs.iter().find(|si| si.key == i.key)))
-                    .for_each(|i| {
+                component.inputs.iter().for_each(|i| {
+                    // check invalid ones -> those that aren't defined in spec
+                    let spec_definition = &spec.inputs.iter().find(|si| si.key == i.key);
+
+                    if let Some(spec_definition) = spec_definition {
+                        generate_component_diagnostics_from_spec(
+                            i,
+                            spec_definition,
+                            &mut diagnostics,
+                        );
+                    } else {
+                        // wasn't found in spec -> invalid key
                         diagnostics.push(Diagnostic::new_simple(
                             lsp_types::Range {
                                 start: lsp_types::Position {
@@ -1031,9 +1039,17 @@ impl LSPHandlers {
                                     character: i.range.end.character,
                                 },
                             },
-                            format!("Input: {} does not exist.", i.key),
+                            format!(
+                                "Invalid input key. Key needs to be one of: '{}'.",
+                                spec.inputs
+                                    .iter()
+                                    .map(|i| i.key.clone())
+                                    .collect::<Vec<String>>()
+                                    .join(", ")
+                            ),
                         ));
-                    });
+                    }
+                });
             }
         }
 
@@ -1124,70 +1140,178 @@ impl LSPHandlers {
         }))
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
     fn on_completion_component(
         &self,
         line: &str,
         position: Position,
         component: &Component,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        if !component.inputs.iter().any(|i| i.hovered) {
-            return Ok(vec![]);
-        }
-
-        let word = parser_utils::ParserUtils::word_before_cursor(
-            line,
-            position.character as usize,
-            |c: char| c.is_whitespace(),
-        );
-
-        let after =
-            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
-                c.is_whitespace() || c == ':'
-            });
-
-        let components_store = self.components.lock().unwrap();
-        let Some(component_spec) = components_store.get(&component.uri) else {
-            warn!(
-                "could not find component spec; indexing went wrong!; searching for {}",
-                component.uri
+        if component.inputs.iter().any(|i| i.hovered) {
+            let word = parser_utils::ParserUtils::word_before_cursor(
+                line,
+                position.character as usize,
+                |c: char| c.is_whitespace(),
             );
 
-            return Ok(vec![]);
-        };
+            let after = parser_utils::ParserUtils::word_after_cursor(
+                line,
+                position.character as usize,
+                |c| c.is_whitespace() || c == ':',
+            );
 
-        // filter out those that were already used
-        let valid_input_autocompletes: Vec<super::ComponentInput> = component_spec
-            .inputs
-            .iter()
-            .filter(|&i| !component.inputs.iter().any(|ci| ci.key == i.key))
-            .cloned() // Clone each element to get an owned version
-            .collect();
+            let components_store = self.components.lock().unwrap();
+            let Some(component_spec) = components_store.get(&component.uri) else {
+                warn!(
+                    "could not find component spec; indexing went wrong!; searching for {}",
+                    component.uri
+                );
 
-        let items = valid_input_autocompletes
-            .into_iter()
-            .filter(|i| i.key.starts_with(word))
-            .flat_map(|i| -> anyhow::Result<LSPCompletion> {
-                Ok(LSPCompletion {
-                    label: i.key.clone(),
-                    details: Some(i.autocomplete_details()),
-                    location: LSPLocation {
-                        range: Range {
-                            start: LSPPosition {
-                                line: position.line,
-                                character: position.character - u32::try_from(word.len())?,
+                return Ok(vec![]);
+            };
+
+            // filter out those that were already used
+            let valid_input_autocompletes: Vec<super::ComponentInput> = component_spec
+                .inputs
+                .iter()
+                .filter(|&i| !component.inputs.iter().any(|ci| ci.key == i.key))
+                .cloned() // Clone each element to get an owned version
+                .collect();
+
+            let items = valid_input_autocompletes
+                .into_iter()
+                .filter(|i| i.key.starts_with(word))
+                .flat_map(|i| -> anyhow::Result<LSPCompletion> {
+                    Ok(LSPCompletion {
+                        label: i.key.clone(),
+                        details: Some(i.autocomplete_details()),
+                        location: LSPLocation {
+                            range: Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position.character - u32::try_from(word.len())?,
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character + u32::try_from(after.len())?,
+                                },
                             },
-                            end: LSPPosition {
-                                line: position.line,
-                                character: position.character + u32::try_from(after.len())?,
+                            ..Default::default()
+                        },
+                    })
+                })
+                .collect();
+
+            return Ok(items);
+        } else if let Some(hovered_input) = component.inputs.iter().find(|i| i.value_plain.hovered)
+        {
+            let word = parser_utils::ParserUtils::word_before_cursor(
+                line,
+                position.character as usize,
+                |c| c.is_whitespace() || c == ':',
+            );
+
+            let after = parser_utils::ParserUtils::word_after_cursor(
+                line,
+                position.character as usize,
+                |c: char| c.is_whitespace(),
+            );
+
+            let components_store = self.components.lock().unwrap();
+            let Some(component_spec) = components_store.get(&component.uri) else {
+                warn!(
+                    "could not find component spec; indexing went wrong!; searching for {}",
+                    component.uri
+                );
+
+                return Ok(vec![]);
+            };
+
+            if let Some(input_spec) = component_spec
+                .inputs
+                .iter()
+                .find(|i| i.key == hovered_input.key)
+            {
+                if let Some(options) = &input_spec.options {
+                    let items = options
+                        .iter()
+                        .filter(|option| option.starts_with(word))
+                        .flat_map(|option| -> anyhow::Result<LSPCompletion> {
+                            Ok(LSPCompletion {
+                                label: option.to_string(),
+                                details: None,
+                                location: LSPLocation {
+                                    range: Range {
+                                        start: LSPPosition {
+                                            line: position.line,
+                                            character: position.character
+                                                - u32::try_from(word.len())?,
+                                        },
+                                        end: LSPPosition {
+                                            line: position.line,
+                                            character: position.character
+                                                + u32::try_from(after.len())?,
+                                        },
+                                    },
+                                    ..Default::default()
+                                },
+                            })
+                        })
+                        .collect();
+
+                    return Ok(items);
+                }
+            }
+        }
+
+        Ok(vec![])
+    }
+}
+
+fn generate_component_diagnostics_from_spec(
+    i: &GitlabInputElement,
+    spec_definition: &ComponentInput,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(options) = &spec_definition.options {
+        if let Some(input_value_element) = &i.value_plain {
+            if let Some(input_value) = &input_value_element.content {
+                if !options.contains(input_value) {
+                    diagnostics.push(Diagnostic::new_simple(
+                        lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: input_value_element.range.start.line,
+                                character: input_value_element.range.start.character,
+                            },
+                            end: lsp_types::Position {
+                                line: input_value_element.range.end.line,
+                                character: input_value_element.range.end.character,
                             },
                         },
-                        ..Default::default()
+                        format!(
+                            "Invalid input value. Value needs to be one of: '{}'.",
+                            options.join(", ")
+                        ),
+                    ));
+                }
+            }
+        } else {
+            diagnostics.push(Diagnostic::new_simple(
+                lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: i.range.start.line,
+                        character: i.range.start.character,
                     },
-                })
-            })
-            .collect();
-
-        Ok(items)
+                    end: lsp_types::Position {
+                        line: i.range.end.line,
+                        character: i.range.end.character,
+                    },
+                },
+                format!(
+                    "No value. Value needs to be one of: '{}'.",
+                    options.join(", ")
+                ),
+            ));
+        }
     }
 }
