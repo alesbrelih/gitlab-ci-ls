@@ -50,6 +50,7 @@
                 ]
             }
         ],
+        "semantic-release-cargo",
         [
             "@semantic-release/git",
             {
@@ -58,7 +59,6 @@
                     "Cargo.lock"
                 ]
             }
-        ],
-        "semantic-release-cargo"
+        ]
     ]
 }
