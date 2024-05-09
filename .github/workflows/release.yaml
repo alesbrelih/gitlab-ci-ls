@@ -17,7 +17,7 @@ jobs:
     uses: semantic-release-action/next-release-version/.github/workflows/next-release-version.yml@v4
 
   build:
-    name: Build for ${{ matrix.target }}
+    name: Build for ${{ matrix.build.target }}
     if: needs.get-next-version.outputs.new-release-published == 'true'
     runs-on: ${{ matrix.build.os }}
     needs:
