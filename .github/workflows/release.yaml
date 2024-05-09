@@ -152,8 +152,8 @@ jobs:
         uses: cycjimmy/semantic-release-action@v4
         with:
           extra_plugins: |
-            @semantic-release/git
             semantic-release-cargo
+            @semantic-release/git
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
