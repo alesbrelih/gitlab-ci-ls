@@ -82,7 +82,7 @@ impl GitImpl {
                 "--branch",
                 &component_info.version,
                 format!("git@{}:{}", component_info.host, component_info.project).as_str(),
-                &repo_dest,
+                repo_dest,
             ])
             .output()
         {
