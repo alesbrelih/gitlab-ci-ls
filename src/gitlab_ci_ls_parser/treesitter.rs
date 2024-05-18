@@ -5,10 +5,10 @@ use lsp_types::Position;
 use tree_sitter::{Query, QueryCursor};
 
 use super::{
-    parser, treesitter_queries::TreesitterQueries, Component, ComponentInput,
-    ComponentInputValueBlock, ComponentInputValuePlain, GitlabComponentElement, GitlabElement,
-    GitlabInputElement, Include, IncludeInformation, LSPPosition, NodeDefinition, Range,
-    RemoteInclude, RuleReference,
+    parser, parser_utils::ParserUtils, treesitter_queries::TreesitterQueries, Component,
+    ComponentInput, ComponentInputValueBlock, ComponentInputValuePlain, GitlabComponentElement,
+    GitlabElement, GitlabInputElement, Include, IncludeInformation, LSPPosition, NodeDefinition,
+    Range, RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -198,7 +198,7 @@ impl Treesitter for TreesitterImpl {
 
                     return Some(GitlabElement {
                         uri: uri.to_string(),
-                        key: node_key.to_string(),
+                        key: ParserUtils::strip_quotes(node_key).to_string(),
                         content: Some(text.to_string()),
                         range: Range {
                             start: LSPPosition {
@@ -296,7 +296,7 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     environments.push(GitlabElement {
-                        key: text.to_owned(),
+                        key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.to_string(),
                         range: Range {
@@ -351,7 +351,7 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     stages.push(GitlabElement {
-                        key: text.to_owned(),
+                        key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.to_string(),
                         range: Range {
@@ -408,7 +408,7 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     extends.push(GitlabElement {
-                        key: text.to_owned(),
+                        key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.to_string(),
                         range: Range {
@@ -469,7 +469,7 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     extends.push(GitlabElement {
-                        key: text.to_owned(),
+                        key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.clone(),
                         range: Range {
@@ -716,7 +716,7 @@ impl Treesitter for TreesitterImpl {
                     }
 
                     needs.push(GitlabElement {
-                        key: text.to_owned(),
+                        key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.clone(),
                         range: Range {
@@ -810,24 +810,20 @@ impl Treesitter for TreesitterImpl {
             .into_iter()
             .flat_map(|m| m.captures.iter())
             .find(|c| c.index == 2)
-            .map(|c| {
-                let text = content[c.node.byte_range()].to_string();
-
-                GitlabElement {
-                    uri: uri.to_string(),
-                    key: text,
-                    content: None,
-                    range: Range {
-                        start: LSPPosition {
-                            line: u32::try_from(c.node.start_position().row).unwrap_or(0),
-                            character: u32::try_from(c.node.start_position().column).unwrap_or(0),
-                        },
-                        end: LSPPosition {
-                            line: u32::try_from(c.node.end_position().row).unwrap_or(0),
-                            character: u32::try_from(c.node.end_position().column).unwrap_or(0),
-                        },
+            .map(|c| GitlabElement {
+                uri: uri.to_string(),
+                key: ParserUtils::strip_quotes(&content[c.node.byte_range()]).to_string(),
+                content: None,
+                range: Range {
+                    start: LSPPosition {
+                        line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                        character: u32::try_from(c.node.start_position().column).unwrap_or(0),
                     },
-                }
+                    end: LSPPosition {
+                        line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                        character: u32::try_from(c.node.end_position().column).unwrap_or(0),
+                    },
+                },
             })
     }
 
@@ -929,7 +925,7 @@ impl Treesitter for TreesitterImpl {
                         current_input = Some(GitlabInputElement {
                             uri: uri.to_string(),
                             content: Some(text.clone()),
-                            key: text,
+                            key: ParserUtils::strip_quotes(&text).to_string(),
                             range: Range {
                                 start: LSPPosition {
                                     line: u32::try_from(c.node.start_position().row).unwrap_or(0),
@@ -951,7 +947,7 @@ impl Treesitter for TreesitterImpl {
                             current.value_plain = Some(GitlabElement {
                                 uri: uri.to_string(),
                                 content: Some(text.clone()),
-                                key: text,
+                                key: ParserUtils::strip_quotes(&text).to_string(),
                                 range: Range {
                                     start: LSPPosition {
                                         line: u32::try_from(c.node.start_position().row)
@@ -973,7 +969,7 @@ impl Treesitter for TreesitterImpl {
                             current.value_block = Some(GitlabElement {
                                 uri: uri.to_string(),
                                 content: Some(text.clone()),
-                                key: text,
+                                key: ParserUtils::strip_quotes(&text).to_string(),
                                 range: Range {
                                     start: LSPPosition {
                                         line: u32::try_from(c.node.start_position().row)
