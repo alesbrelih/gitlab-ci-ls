@@ -289,16 +289,43 @@ impl LSPHandlers {
             }
             parser::PositionType::Needs(node) => {
                 for (uri, content) in store {
-                    if let Some(element) = self.parser.get_root_node(
-                        uri,
-                        content,
-                        parser_utils::ParserUtils::strip_quotes(node.name.as_str()),
-                    ) {
-                        locations.push(LSPLocation {
-                            uri: uri.clone(),
-                            range: element.range,
-                        });
-                    }
+                    let need_split = node.name.split(' ').collect::<Vec<&str>>();
+
+                    // need can be: needs: "wow [matrix1, matrix2]
+                    // currently just ignore matrixes
+                    match need_split.len() {
+                        1 => {
+                            if let Some(element) = self.parser.get_root_node(
+                                uri,
+                                content,
+                                parser_utils::ParserUtils::strip_quotes(node.name.as_str()),
+                            ) {
+                                locations.push(LSPLocation {
+                                    uri: uri.clone(),
+                                    range: element.range,
+                                });
+                            }
+                        }
+
+                        2 => {
+                            if let Some(element) = self.parser.get_root_node(
+                                uri,
+                                content,
+                                parser_utils::ParserUtils::strip_quotes(need_split[0]),
+                            ) {
+                                locations.push(LSPLocation {
+                                    uri: uri.clone(),
+                                    range: element.range,
+                                });
+                            }
+                        }
+
+                        invalid => {
+                            warn!(
+                                "gotoref: invalid split len. got: {invalid}; needs: {need_split:?}"
+                            );
+                        }
+                    };
                 }
             }
             parser::PositionType::Stage => {
@@ -990,11 +1017,38 @@ impl LSPHandlers {
             .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
 
         'needs: for need in needs {
-            for (_, node) in all_nodes.iter() {
-                if node.get(need.key.as_str()).is_some() {
-                    continue 'needs;
+            let need_split = need.key.split(' ').collect::<Vec<&str>>();
+
+            match need_split.len() {
+                1 => {
+                    // default needs containing just a reference
+                    // to a job
+                    for (_, node) in all_nodes.iter() {
+                        if node.get(need.key.as_str()).is_some() {
+                            continue 'needs;
+                        }
+                    }
                 }
-            }
+
+                2 => {
+                    // special needs where it can reference a matrix inside a job
+                    // needs: "job-name [matrix-value-1,matrix-value-2,..]
+                    // currently just check split value that it matches a job
+                    // TODO: handle matrix references
+
+                    let node_key = need_split[0];
+                    for (_, node) in all_nodes.iter() {
+                        if node.get(node_key).is_some() {
+                            continue 'needs;
+                        }
+                    }
+                }
+
+                invalid => {
+                    warn!("invalid split len. got: {invalid}; needs: {need_split:?}");
+                }
+            };
+
             diagnostics.push(Diagnostic::new_simple(
                 lsp_types::Range {
                     start: lsp_types::Position {
