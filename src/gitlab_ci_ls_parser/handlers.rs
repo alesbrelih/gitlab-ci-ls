@@ -9,7 +9,9 @@ use lsp_types::{
 };
 use regex::Regex;
 
-use crate::gitlab_ci_ls_parser::DiagnosticsNotification;
+use crate::gitlab_ci_ls_parser::{
+    parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition,
+};
 
 use super::{
     fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, ComponentInput,
@@ -110,6 +112,39 @@ impl LSPHandlers {
                 for (document_uri, n) in nodes.iter() {
                     for (key, content) in n {
                         if key.eq(&node) {
+                            let cnt = match self.parser.get_full_definition(
+                                GitlabElement {
+                                    key: key.clone(),
+                                    content: Some(content.to_string()),
+                                    uri: document_uri.to_string(),
+                                    ..Default::default()
+                                },
+                                &store,
+                            ) {
+                                Ok(c) => c,
+                                Err(err) => return Some(LSPResult::Error(err)),
+                            };
+
+                            return Some(LSPResult::Hover(HoverResult {
+                                id: request.id,
+                                content: format!("```yaml\n{cnt}\n```"),
+                            }));
+                        }
+                    }
+                }
+
+                None
+            }
+
+            parser::PositionType::Needs(NodeDefinition { name }) => {
+                let need_split = ParserUtils::strip_quotes(&name)
+                    .split(' ')
+                    .collect::<Vec<&str>>();
+                let node_name = need_split.first()?;
+
+                for (document_uri, n) in nodes.iter() {
+                    for (key, content) in n {
+                        if key.eq(node_name) {
                             let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
