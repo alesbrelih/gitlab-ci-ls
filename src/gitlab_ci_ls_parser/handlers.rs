@@ -5,7 +5,8 @@ use log::{error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position,
+    TextDocumentPositionParams, Url,
 };
 use regex::Regex;
 
@@ -1355,6 +1356,58 @@ impl LSPHandlers {
         }
 
         Ok(vec![])
+    }
+
+    pub fn on_prepare_rename(&self, request: Request) -> Option<LSPResult> {
+        let start = Instant::now();
+        let params: TextDocumentPositionParams = serde_json::from_value(request.params).ok()?;
+
+        let store = self.store.lock().unwrap();
+        let document_uri = params.text_document.uri;
+        let document = store.get::<String>(&document_uri.clone().into())?;
+
+        let position = params.position;
+        let line = document.lines().nth(position.line as usize)?;
+
+        let res = match self.parser.get_position_type(document, position) {
+            parser::PositionType::RootNode => {
+                let word = parser_utils::ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    char::is_whitespace,
+                );
+                let after = parser_utils::ParserUtils::word_after_cursor(
+                    line,
+                    position.character as usize,
+                    char::is_whitespace,
+                );
+
+                Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                    id: request.id,
+                    can_rename: true,
+                    range: Some(Range {
+                        start: LSPPosition {
+                            line: position.line,
+                            character: position.character - u32::try_from(word.len()).ok()?,
+                        },
+                        end: LSPPosition {
+                            line: position.line,
+                            // -1 is to ignore the last :
+                            character: position.character + u32::try_from(after.len() - 1).ok()?,
+                        },
+                    }),
+                }))
+            }
+            _ => Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                id: request.id,
+                can_rename: false,
+                range: None,
+            })),
+        };
+
+        info!("ONCHANGE ELAPSED: {:?}", start.elapsed());
+
+        res
     }
 }
 

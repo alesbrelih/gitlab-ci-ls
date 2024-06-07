@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lsp_server::RequestId;
-use lsp_types::{Diagnostic, Url};
+use lsp_types::{Diagnostic, Position, Url};
 
 pub mod fs_utils;
 pub mod git;
@@ -34,6 +34,13 @@ pub struct DefinitionResult {
 pub struct ReferencesResult {
     pub id: RequestId,
     pub locations: Vec<GitlabElement>,
+}
+
+#[derive(Debug)]
+pub struct PrepareRenameResult {
+    pub id: RequestId,
+    pub can_rename: bool,
+    pub range: Option<Range>,
 }
 
 #[derive(Debug)]
@@ -74,6 +81,7 @@ pub enum LSPResult {
     Definition(DefinitionResult),
     Diagnostics(DiagnosticsNotification),
     References(ReferencesResult),
+    PrepareRename(PrepareRenameResult),
     Error(anyhow::Error),
 }
 

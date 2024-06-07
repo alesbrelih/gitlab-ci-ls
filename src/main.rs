@@ -84,6 +84,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             all_commit_characters: None,
             completion_item: None,
         }),
+        rename_provider: Some(lsp_types::OneOf::Right(lsp_types::RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions {
+                ..Default::default()
+            },
+        })),
         ..Default::default()
     })?;
 
@@ -115,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     simple_logging::log_to_file(
         fs_utils.get_path(&init_params.initialization_options.log_path),
-        LevelFilter::Warn,
+        LevelFilter::Info,
     )?;
 
     let remote_urls = match get_git_remotes(&init_params.root_path) {

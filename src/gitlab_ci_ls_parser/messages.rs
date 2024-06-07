@@ -12,7 +12,7 @@ use crate::gitlab_ci_ls_parser::LSPResult;
 
 use super::{
     handlers::LSPHandlers, CompletionResult, DefinitionResult, DiagnosticsNotification,
-    HoverResult, ReferencesResult,
+    HoverResult, PrepareRenameResult, ReferencesResult,
 };
 
 pub struct Messages {
@@ -52,6 +52,7 @@ impl Messages {
                 "textDocument/definition" => self.events.on_definition(request),
                 "textDocument/references" => self.events.on_references(request),
                 "textDocument/completion" => self.events.on_completion(request),
+                "textDocument/prepareRename" => self.events.on_prepare_rename(request),
                 "shutdown" => {
                     error!("SHUTDOWN!!");
                     exit(0);
@@ -101,6 +102,10 @@ fn handle_result(msg: &Message, result: Option<LSPResult>) -> Option<Message> {
         Some(LSPResult::Diagnostics(diagnostics_result)) => {
             info!("send definition msg: {:?}", diagnostics_result);
             Some(diagnostics(diagnostics_result))
+        }
+        Some(LSPResult::PrepareRename(res)) => {
+            info!("send prepare rename msg: {:?}", res);
+            Some(prepare_rename(res))
         }
         Some(LSPResult::Error(err)) => {
             error!("error handling message: {:?} got error: {:?}", msg, err);
@@ -262,4 +267,41 @@ fn diagnostics(notification: DiagnosticsNotification) -> Message {
         })
         .unwrap(),
     })
+}
+
+fn prepare_rename(res: PrepareRenameResult) -> Message {
+    if res.can_rename {
+        let range = res.range.unwrap();
+
+        Message::Response(Response {
+            id: res.id,
+            result: serde_json::to_value(lsp_types::PrepareRenameResponse::Range(
+                lsp_types::Range {
+                    start: Position {
+                        line: range.start.line,
+                        character: range.start.character,
+                    },
+                    end: Position {
+                        line: range.end.line,
+                        character: range.end.character,
+                    },
+                },
+            ))
+            .ok(),
+            error: None,
+        })
+    } else {
+        Message::Response(Response {
+            id: res.id,
+            result: serde_json::to_value(lsp_types::PrepareRenameResponse::DefaultBehavior {
+                default_behavior: res.can_rename,
+            })
+            .ok(),
+            error: Some(lsp_server::ResponseError {
+                code: 400,
+                message: "Not supported".to_string(),
+                data: None,
+            }),
+        })
+    }
 }
