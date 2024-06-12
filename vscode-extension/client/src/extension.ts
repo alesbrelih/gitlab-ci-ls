@@ -15,6 +15,10 @@ import {
 let client: LanguageClient;
 
 export function activate(_: ExtensionContext) {
+  if (client?.isRunning()) {
+    return;
+  }
+
   const config = vscode.workspace.getConfiguration("gitlabLs");
 
   const serverOptions: ServerOptions = {
