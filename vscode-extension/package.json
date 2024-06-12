@@ -33,7 +33,7 @@
         },
         "gitlabLs.cachePath": {
           "type": "string",
-          "default": "~/.cache/gitlab-ci-ls",
+          "default": "~/.cache/gitlab-ci-ls/",
           "description": "Cache path for remote includes."
         },
         "gitlabLs.packageMap": {
