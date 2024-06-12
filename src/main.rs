@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     simple_logging::log_to_file(
         fs_utils.get_path(&init_params.initialization_options.log_path),
-        LevelFilter::Info,
+        LevelFilter::Warn,
     )?;
 
     let remote_urls = match get_git_remotes(&init_params.root_path) {

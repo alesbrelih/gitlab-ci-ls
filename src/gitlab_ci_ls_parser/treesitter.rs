@@ -2,7 +2,7 @@ use std::usize;
 
 use log::error;
 use lsp_types::Position;
-use tree_sitter::{Query, QueryCursor};
+use tree_sitter::{Node, Query, QueryCursor};
 
 use super::{
     parser, parser_utils::ParserUtils, treesitter_queries::TreesitterQueries, Component,
@@ -14,11 +14,18 @@ use super::{
 // TODO: initialize tree only once
 pub trait Treesitter {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
+    fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
+    fn get_all_rule_references(
+        &self,
+        uri: &str,
+        content: &str,
+        rule: Option<&str>,
+    ) -> Vec<GitlabElement>;
     fn get_all_extends(
         &self,
         uri: String,
@@ -472,17 +479,7 @@ impl Treesitter for TreesitterImpl {
                         key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.clone(),
-                        range: Range {
-                            start: LSPPosition {
-                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.start_position().column)
-                                    .unwrap_or(0),
-                            },
-                            end: LSPPosition {
-                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
-                            },
-                        },
+                        range: get_range(c.node, text).unwrap_or_default(),
                     });
                 }
             }
@@ -719,17 +716,7 @@ impl Treesitter for TreesitterImpl {
                         key: ParserUtils::strip_quotes(text).to_string(),
                         content: None,
                         uri: uri.clone(),
-                        range: Range {
-                            start: LSPPosition {
-                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.start_position().column)
-                                    .unwrap_or(0),
-                            },
-                            end: LSPPosition {
-                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
-                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
-                            },
-                        },
+                        range: get_range(c.node, text).unwrap_or_default(),
                     });
                 }
             }
@@ -999,6 +986,133 @@ impl Treesitter for TreesitterImpl {
 
         components
     }
+
+    fn get_all_rule_references(
+        &self,
+        uri: &str,
+        content: &str,
+        rule: Option<&str>,
+    ) -> Vec<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::language(),
+            &TreesitterQueries::get_all_rule_references(rule),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let mut extends: Vec<GitlabElement> = vec![];
+
+        for mat in matches {
+            for c in mat.captures {
+                if c.index == 2 {
+                    let text = &content[c.node.byte_range()];
+                    if c.node.start_position().row != c.node.end_position().row {
+                        // sanity check
+                        error!(
+                            "ALL: extends spans over multiple rows: uri: {} text: {}",
+                            uri, text
+                        );
+
+                        continue;
+                    }
+
+                    extends.push(GitlabElement {
+                        key: ParserUtils::strip_quotes(text).to_string(),
+                        content: None,
+                        uri: uri.to_string(),
+                        range: get_range(c.node, text).unwrap_or_default(),
+                    });
+                }
+            }
+        }
+
+        extends
+    }
+
+    fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = match Query::new(
+            &tree_sitter_yaml::language(),
+            &TreesitterQueries::get_root_node_key(node_key),
+        ) {
+            Ok(q) => q,
+            Err(err) => {
+                error!(
+                    "could not parse treesitter query; got content:\n{}\ngot error: {}",
+                    &TreesitterQueries::get_root_node(node_key),
+                    err,
+                );
+
+                return None;
+            }
+        };
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        for mat in matches {
+            for c in mat.captures {
+                if c.index == 0 {
+                    let text = &content[c.node.byte_range()];
+
+                    return Some(GitlabElement {
+                        uri: uri.to_string(),
+                        key: ParserUtils::strip_quotes(node_key).to_string(),
+                        content: Some(text.to_string()),
+                        range: Range {
+                            start: LSPPosition {
+                                line: u32::try_from(c.node.start_position().row).ok()?,
+                                character: u32::try_from(c.node.start_position().column).ok()?,
+                            },
+                            end: LSPPosition {
+                                line: u32::try_from(c.node.end_position().row).ok()?,
+                                character: u32::try_from(c.node.end_position().column).ok()?,
+                            },
+                        },
+                    });
+                }
+            }
+        }
+
+        None
+    }
+}
+
+fn get_range(node: Node<'_>, text: &str) -> anyhow::Result<Range> {
+    let mut start_character = u32::try_from(node.start_position().column)?;
+    let mut end_character = u32::try_from(node.end_position().column)?;
+    if text.starts_with('\'') || text.starts_with('"') {
+        start_character += 1;
+        end_character -= 1;
+    }
+
+    Ok(Range {
+        start: LSPPosition {
+            line: u32::try_from(node.start_position().row)?,
+            character: start_character,
+        },
+        end: LSPPosition {
+            line: u32::try_from(node.end_position().row)?,
+            character: end_character,
+        },
+    })
 }
 
 #[cfg(test)]

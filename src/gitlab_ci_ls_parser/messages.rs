@@ -1,10 +1,10 @@
 use std::process::exit;
 
 use log::{error, info, warn};
-use lsp_server::{Connection, Message, Response};
+use lsp_server::{Connection, Message, Response, ResponseError};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionTextEdit, Hover, HoverContents,
-    LocationLink, MarkedString, MarkupContent, Position, TextEdit,
+    LocationLink, MarkedString, MarkupContent, Position, TextEdit, WorkspaceEdit,
 };
 use reqwest::Url;
 
@@ -12,7 +12,7 @@ use crate::gitlab_ci_ls_parser::LSPResult;
 
 use super::{
     handlers::LSPHandlers, CompletionResult, DefinitionResult, DiagnosticsNotification,
-    HoverResult, PrepareRenameResult, ReferencesResult,
+    HoverResult, PrepareRenameResult, ReferencesResult, RenameResult,
 };
 
 pub struct Messages {
@@ -53,6 +53,7 @@ impl Messages {
                 "textDocument/references" => self.events.on_references(request),
                 "textDocument/completion" => self.events.on_completion(request),
                 "textDocument/prepareRename" => self.events.on_prepare_rename(request),
+                "textDocument/rename" => self.events.on_rename(request),
                 "shutdown" => {
                     error!("SHUTDOWN!!");
                     exit(0);
@@ -107,12 +108,38 @@ fn handle_result(msg: &Message, result: Option<LSPResult>) -> Option<Message> {
             info!("send prepare rename msg: {:?}", res);
             Some(prepare_rename(res))
         }
+        Some(LSPResult::Rename(res)) => {
+            info!("send prepare rename msg: {:?}", res);
+            Some(rename(res))
+        }
         Some(LSPResult::Error(err)) => {
             error!("error handling message: {:?} got error: {:?}", msg, err);
             null_response(msg)
         }
         None => null_response(msg),
     }
+}
+
+fn rename(res: RenameResult) -> Message {
+    let mut res = Response {
+        id: res.id,
+        result: serde_json::to_value(WorkspaceEdit {
+            changes: res.edits,
+            ..Default::default()
+        })
+        .ok(),
+        error: None,
+    };
+
+    if let Some(err) = res.error {
+        res.error = Some(ResponseError {
+            code: -1,
+            message: err.message,
+            data: None,
+        });
+    }
+
+    Message::Response(res)
 }
 
 fn null_response(msg: &Message) -> Option<Message> {
@@ -270,38 +297,34 @@ fn diagnostics(notification: DiagnosticsNotification) -> Message {
 }
 
 fn prepare_rename(res: PrepareRenameResult) -> Message {
-    if res.can_rename {
-        let range = res.range.unwrap();
+    let mut r = Response {
+        id: res.id,
+        result: None,
+        error: None,
+    };
 
-        Message::Response(Response {
-            id: res.id,
-            result: serde_json::to_value(lsp_types::PrepareRenameResponse::Range(
-                lsp_types::Range {
-                    start: Position {
-                        line: range.start.line,
-                        character: range.start.character,
-                    },
-                    end: Position {
-                        line: range.end.line,
-                        character: range.end.character,
-                    },
+    if let Some(range) = res.range {
+        r.result =
+            serde_json::to_value(lsp_types::PrepareRenameResponse::Range(lsp_types::Range {
+                start: Position {
+                    line: range.start.line,
+                    character: range.start.character,
                 },
-            ))
-            .ok(),
-            error: None,
-        })
-    } else {
-        Message::Response(Response {
-            id: res.id,
-            result: serde_json::to_value(lsp_types::PrepareRenameResponse::DefaultBehavior {
-                default_behavior: res.can_rename,
-            })
-            .ok(),
-            error: Some(lsp_server::ResponseError {
-                code: 400,
-                message: "Not supported".to_string(),
-                data: None,
-            }),
-        })
+                end: Position {
+                    line: range.end.line,
+                    character: range.end.character,
+                },
+            }))
+            .ok();
     }
+
+    if let Some(err) = res.err {
+        r.error = Some(ResponseError {
+            code: -1,
+            message: err,
+            data: None,
+        });
+    }
+
+    Message::Response(r)
 }

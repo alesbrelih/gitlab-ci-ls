@@ -94,10 +94,17 @@ pub trait Parser {
         content: &str,
         extend_name: Option<&str>,
     ) -> Vec<GitlabElement>;
+    fn get_all_rule_references(
+        &self,
+        uri: String,
+        content: &str,
+        rule_name: Option<&str>,
+    ) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
+    fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults>;
     fn parse_contents_recursive(
         &self,
@@ -558,6 +565,16 @@ impl Parser for ParserImpl {
         self.treesitter.get_all_job_needs(uri, content, needs_name)
     }
 
+    fn get_all_rule_references(
+        &self,
+        uri: String,
+        content: &str,
+        rule_name: Option<&str>,
+    ) -> Vec<GitlabElement> {
+        self.treesitter
+            .get_all_rule_references(&uri, content, rule_name)
+    }
+
     fn get_variable_definitions(
         &self,
         variable: &str,
@@ -623,5 +640,9 @@ impl Parser for ParserImpl {
 
         serde_yaml::to_string(&merged_with_key)
             .map_err(|e| anyhow!("error serializing node; got err: {e}"))
+    }
+
+    fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
+        self.treesitter.get_root_node_key(uri, content, node_key)
     }
 }

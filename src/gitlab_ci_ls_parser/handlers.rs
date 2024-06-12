@@ -5,13 +5,14 @@ use log::{error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position,
-    TextDocumentPositionParams, Url,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position, RenameParams,
+    TextDocumentPositionParams, TextEdit, Url,
 };
 use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
-    parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition,
+    parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition, PrepareRenameResult,
+    RenameResult,
 };
 
 use super::{
@@ -64,6 +65,14 @@ impl LSPHandlers {
         }
 
         events
+    }
+
+    // When renaming or some other action that will be handled later on we need
+    // to prevent modifications on cached/downloaded files.
+    fn can_path_be_modified(&self, path: &str) -> bool {
+        !path
+            .to_lowercase()
+            .contains(&self.cfg.cache_path.to_lowercase())
     }
 
     pub fn on_hover(&self, request: Request) -> Option<LSPResult> {
@@ -1358,12 +1367,22 @@ impl LSPHandlers {
         Ok(vec![])
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn on_prepare_rename(&self, request: Request) -> Option<LSPResult> {
         let start = Instant::now();
         let params: TextDocumentPositionParams = serde_json::from_value(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
         let document_uri = params.text_document.uri;
+
+        if !self.can_path_be_modified(document_uri.as_ref()) {
+            return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                id: request.id,
+                range: None,
+                err: Some("Cannot rename externally included files".to_string()),
+            }));
+        }
+
         let document = store.get::<String>(&document_uri.clone().into())?;
 
         let position = params.position;
@@ -1380,11 +1399,20 @@ impl LSPHandlers {
                     line,
                     position.character as usize,
                     char::is_whitespace,
-                );
+                )
+                .trim_end_matches(':');
+
+                let full_word = format!("{word}{after}");
+                if LSPHandlers::is_predefined_root_element(&full_word) {
+                    return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                        id: request.id,
+                        range: None,
+                        err: Some("Cannot rename Gitlab elements".to_string()),
+                    }));
+                }
 
                 Some(LSPResult::PrepareRename(super::PrepareRenameResult {
                     id: request.id,
-                    can_rename: true,
                     range: Some(Range {
                         start: LSPPosition {
                             line: position.line,
@@ -1392,22 +1420,363 @@ impl LSPHandlers {
                         },
                         end: LSPPosition {
                             line: position.line,
-                            // -1 is to ignore the last :
-                            character: position.character + u32::try_from(after.len() - 1).ok()?,
+                            character: position.character + u32::try_from(after.len()).ok()?,
                         },
                     }),
+                    err: None,
                 }))
+            }
+            parser::PositionType::Extend
+            | parser::PositionType::Needs(_)
+            | parser::PositionType::RuleReference(_) => {
+                let word = parser_utils::ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c| c.is_whitespace() || c == '\'' || c == '"',
+                );
+                let after = parser_utils::ParserUtils::word_after_cursor(
+                    line,
+                    position.character as usize,
+                    |c| c.is_whitespace() || c == '\'' || c == '"',
+                );
+
+                let job = format!("{word}{after}");
+                for (uri, content) in store.iter() {
+                    if !self.can_path_be_modified(uri) {
+                        continue;
+                    }
+
+                    if self.parser.get_root_node_key(uri, content, &job).is_some() {
+                        return Some(LSPResult::PrepareRename(PrepareRenameResult {
+                            id: request.id,
+                            range: Some(Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position.character
+                                        - u32::try_from(word.len()).ok()?,
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character
+                                        + u32::try_from(after.len()).ok()?,
+                                },
+                            }),
+                            err: None,
+                        }));
+                    }
+                }
+                return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                    id: request.id,
+                    range: None,
+                    err: Some("Could not find definition".to_string()),
+                }));
             }
             _ => Some(LSPResult::PrepareRename(super::PrepareRenameResult {
                 id: request.id,
-                can_rename: false,
                 range: None,
+                err: Some("Not supported".to_string()),
             })),
         };
 
-        info!("ONCHANGE ELAPSED: {:?}", start.elapsed());
+        info!("ON PREPARE RENAME ELAPSED: {:?}", start.elapsed());
 
         res
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn on_rename(&self, request: Request) -> Option<LSPResult> {
+        let start = Instant::now();
+        let params: RenameParams = serde_json::from_value(request.params).ok()?;
+
+        info!("got rename params: {params:?}");
+
+        let store = self.store.lock().unwrap();
+        let document_uri = params.text_document_position.text_document.uri;
+
+        // This is redundant but I guess could be needed for when prepare_rename isn't supported
+        // by the client
+        if !self.can_path_be_modified(document_uri.as_ref()) {
+            return Some(LSPResult::Rename(super::RenameResult {
+                id: request.id,
+                edits: None,
+                err: Some("Cannot rename externally included files".to_string()),
+            }));
+        }
+
+        let document = store.get::<String>(&document_uri.clone().into())?;
+
+        let position = params.text_document_position.position;
+        let line = document.lines().nth(position.line as usize)?;
+
+        let mut edits: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        match self.parser.get_position_type(document, position) {
+            parser::PositionType::RootNode => {
+                let text_edits = edits.entry(document_uri.clone()).or_default();
+
+                let word = parser_utils::ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    char::is_whitespace,
+                );
+                let after = parser_utils::ParserUtils::word_after_cursor(
+                    line,
+                    position.character as usize,
+                    char::is_whitespace,
+                )
+                .trim_end_matches(':');
+
+                let full_word = format!("{word}{after}");
+
+                if LSPHandlers::is_predefined_root_element(&full_word) {
+                    return Some(LSPResult::Rename(super::RenameResult {
+                        id: request.id,
+                        edits: None,
+                        err: Some("Cannot rename Gitlab elements".to_string()),
+                    }));
+                }
+
+                text_edits.push(TextEdit {
+                    new_text: params.new_name.clone(),
+                    range: lsp_types::Range {
+                        start: Position {
+                            line: position.line,
+                            character: position.character - u32::try_from(word.len()).ok()?,
+                        },
+                        end: Position {
+                            line: position.line,
+                            character: position.character + u32::try_from(after.len()).ok()?,
+                        },
+                    },
+                });
+
+                for (uri, content) in store.iter() {
+                    if !self.can_path_be_modified(uri) {
+                        continue;
+                    }
+
+                    // TODO: ? should be removed and just skip this entry
+                    let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
+
+                    text_edits.append(&mut self.rename_extends(
+                        uri,
+                        content,
+                        &full_word,
+                        &params.new_name,
+                    ));
+
+                    text_edits.append(&mut self.rename_needs(
+                        uri,
+                        content,
+                        &full_word,
+                        &params.new_name,
+                    ));
+
+                    text_edits.append(&mut self.rename_rule_references(
+                        uri,
+                        content,
+                        &full_word,
+                        &params.new_name,
+                    ));
+                }
+            }
+            parser::PositionType::Extend
+            | parser::PositionType::RuleReference(_)
+            | parser::PositionType::Needs(_) => {
+                let word = parser_utils::ParserUtils::word_before_cursor(
+                    line,
+                    position.character as usize,
+                    |c| c.is_whitespace() || c == '\'' || c == '"',
+                );
+
+                let after = parser_utils::ParserUtils::word_after_cursor(
+                    line,
+                    position.character as usize,
+                    |c| c.is_whitespace() || c == '\'' || c == '"',
+                );
+
+                let job = format!("{word}{after}");
+
+                let mut is_renamed_job_inside_the_project = false;
+
+                for (uri, content) in store.iter() {
+                    if !self.can_path_be_modified(uri) {
+                        continue;
+                    }
+
+                    // TODO: ? should be removed and just skip this entry
+                    let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
+
+                    if let Some(r) = self.rename_root_node(uri, content, &job, &params.new_name) {
+                        is_renamed_job_inside_the_project = true;
+                        text_edits.push(r);
+                    }
+
+                    text_edits.append(&mut self.rename_extends(
+                        uri,
+                        content,
+                        &job,
+                        &params.new_name,
+                    ));
+
+                    text_edits.append(&mut self.rename_needs(uri, content, &job, &params.new_name));
+
+                    text_edits.append(&mut self.rename_rule_references(
+                        uri,
+                        content,
+                        &job,
+                        &params.new_name,
+                    ));
+                }
+
+                // adding this at the bottom because if we are trying to rename some extend that
+                // was declared only in cached files this wont be reached
+                if !is_renamed_job_inside_the_project {
+                    return Some(LSPResult::Rename(super::RenameResult {
+                        id: request.id,
+                        edits: None,
+                        err: Some(
+                            "Cannot rename extend which has definition outside project scope"
+                                .to_string(),
+                        ),
+                    }));
+                }
+            }
+            _ => {
+                warn!("invalid type for rename");
+            }
+        };
+
+        info!("ON RENAME ELAPSED: {:?}", start.elapsed());
+
+        Some(LSPResult::Rename(RenameResult {
+            id: request.id,
+            edits: Some(edits),
+            err: None,
+        }))
+    }
+
+    fn rename_extends(
+        &self,
+        uri: &str,
+        content: &str,
+        current_name: &str,
+        new_name: &str,
+    ) -> Vec<TextEdit> {
+        let extends = self
+            .parser
+            .get_all_extends(uri.to_string(), content, Some(current_name));
+
+        let mut text_edits = vec![];
+        for e in extends {
+            text_edits.push(TextEdit {
+                range: lsp_types::Range {
+                    start: Position {
+                        line: e.range.start.line,
+                        character: e.range.start.character,
+                    },
+                    end: Position {
+                        line: e.range.end.line,
+                        character: e.range.end.character,
+                    },
+                },
+                new_text: new_name.to_string(),
+            });
+        }
+
+        text_edits
+    }
+
+    fn rename_needs(
+        &self,
+        uri: &str,
+        content: &str,
+        current_name: &str,
+        new_name: &str,
+    ) -> Vec<TextEdit> {
+        let extends = self
+            .parser
+            .get_all_job_needs(uri.to_string(), content, Some(current_name));
+
+        let mut text_edits = vec![];
+        for e in extends {
+            text_edits.push(TextEdit {
+                range: lsp_types::Range {
+                    start: Position {
+                        line: e.range.start.line,
+                        character: e.range.start.character,
+                    },
+                    end: Position {
+                        line: e.range.end.line,
+                        character: e.range.end.character,
+                    },
+                },
+                new_text: new_name.to_string(),
+            });
+        }
+
+        text_edits
+    }
+
+    fn rename_rule_references(
+        &self,
+        uri: &str,
+        content: &str,
+        full_word: &str,
+        new_name: &str,
+    ) -> Vec<TextEdit> {
+        let rule_references =
+            self.parser
+                .get_all_rule_references(uri.to_string(), content, Some(full_word));
+
+        let mut text_edits = vec![];
+        for r in rule_references {
+            text_edits.push(TextEdit {
+                range: lsp_types::Range {
+                    start: Position {
+                        line: r.range.start.line,
+                        character: r.range.start.character,
+                    },
+                    end: Position {
+                        line: r.range.end.line,
+                        character: r.range.end.character,
+                    },
+                },
+                new_text: new_name.to_string(),
+            });
+        }
+
+        text_edits
+    }
+
+    fn is_predefined_root_element(full_word: &str) -> bool {
+        let predefined = ["default", "variables", "include", "stages", "image"];
+        predefined.contains(&full_word)
+    }
+
+    fn rename_root_node(
+        &self,
+        uri: &str,
+        content: &str,
+        current_name: &str,
+        new_name: &str,
+    ) -> Option<TextEdit> {
+        if let Some(e) = self.parser.get_root_node_key(uri, content, current_name) {
+            return Some(TextEdit {
+                range: lsp_types::Range {
+                    start: Position {
+                        line: e.range.start.line,
+                        character: e.range.start.character,
+                    },
+                    end: Position {
+                        line: e.range.end.line,
+                        character: e.range.end.character,
+                    },
+                },
+                new_text: new_name.to_string(),
+            });
+        }
+
+        None
     }
 }
 

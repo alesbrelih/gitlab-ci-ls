@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lsp_server::RequestId;
-use lsp_types::{Diagnostic, Position, Url};
+use lsp_types::{Diagnostic, Position, TextEdit, Url};
 
 pub mod fs_utils;
 pub mod git;
@@ -39,8 +39,15 @@ pub struct ReferencesResult {
 #[derive(Debug)]
 pub struct PrepareRenameResult {
     pub id: RequestId,
-    pub can_rename: bool,
     pub range: Option<Range>,
+    pub err: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct RenameResult {
+    pub id: RequestId,
+    pub edits: Option<HashMap<Url, Vec<TextEdit>>>,
+    pub err: Option<String>,
 }
 
 #[derive(Debug)]
@@ -82,6 +89,7 @@ pub enum LSPResult {
     Diagnostics(DiagnosticsNotification),
     References(ReferencesResult),
     PrepareRename(PrepareRenameResult),
+    Rename(RenameResult),
     Error(anyhow::Error),
 }
 

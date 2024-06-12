@@ -4,7 +4,10 @@ impl TreesitterQueries {
     pub fn get_all_extends(extend_name: Option<&str>) -> String {
         let mut search = String::new();
         if extend_name.is_some() {
-            search = format!("(#eq? @value \"{}\")", extend_name.unwrap());
+            let extend_name = extend_name.unwrap();
+            search = format!(
+                r#"(#any-of? @value "{extend_name}" "'{extend_name}'" "\"{extend_name}\"")"#,
+            );
         }
 
         format!(
@@ -34,6 +37,26 @@ impl TreesitterQueries {
                             block_mapping_pair
                                 key: (flow_node(plain_scalar(string_scalar)@key))
                         )@value
+                    )
+                )
+            )
+            (#eq? @key "{node_key}")
+        )
+        "#
+        )
+    }
+
+    pub fn get_root_node_key(node_key: &str) -> String {
+        format!(
+            r#"
+        (
+            stream(
+                document(
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@key))
+                        )
                     )
                 )
             )
@@ -134,6 +157,45 @@ impl TreesitterQueries {
                 )
             )
             (#eq? @key "stage")
+            {search}
+        )
+        "#
+        )
+    }
+
+    pub fn get_all_rule_references(rule: Option<&str>) -> String {
+        let mut search = String::new();
+        if rule.is_some() {
+            let rule = rule.unwrap();
+            search =
+                format!(r#"(#any-of? @rule_reference_value "{rule}" "'{rule}'" "\"{rule}\"")"#,);
+        }
+
+        format!(
+            r#"
+        (
+            block_mapping_pair
+            key: (flow_node) @rule_reference_key
+            value: (
+                block_node(
+                    block_sequence(
+                        block_sequence_item(
+                            flow_node
+                            (
+                              (tag)@rule_reference_tag
+                              (
+                                flow_sequence(
+                                    (flow_node[(single_quote_scalar)(double_quote_scalar)])@rule_reference_value
+                                    (_)?
+                                )
+                               )
+                            )
+                        )
+                    )
+                )
+            )
+            (#eq? @rule_reference_key "rules")
+            (#eq? @rule_reference_tag "!reference")
             {search}
         )
         "#
@@ -577,7 +639,10 @@ impl TreesitterQueries {
     pub fn get_all_job_needs(needs_name: Option<&str>) -> String {
         let mut search = String::new();
         if needs_name.is_some() {
-            search = format!("(#eq? @needs_job_value \"{}\")", needs_name.unwrap());
+            let needs_name = needs_name.unwrap();
+            search = format!(
+                r#"(#any-of? @needs_job_value "{needs_name}" "'{needs_name}'" "\"{needs_name}\"")"#,
+            );
         }
 
         format!(
