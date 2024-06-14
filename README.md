@@ -11,11 +11,12 @@ It is intended to be used alongside `yaml-language-server` (yamlls), providing s
 
 ## Features
 
-- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables` and `needs`.
-- **Find References**: Find all usages of `jobs` and `extends`.
-- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, and `variables`.
+- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables`, `needs`, `extends` and `variables`.
+- **Find References**: Find all usages of `jobs`, `extends` and `stages`.
+- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, `variables` and `components`.
 - **Hover Information**: View documentation for job with merged definitions.
-- **Diagnostics**: Identifies issues with `extends` references and `stage` definitions.
+- **Diagnostics**: Identifies issues with `extends` references, `stage` definitions, `job needs` usage and `components`.
+- **Rename**: Supports job renaming.
 
 It also supports jump to included files. In case it is a remote file it tries to downloading using
 current workspace git setup and caches it locally.
