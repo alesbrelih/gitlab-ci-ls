@@ -18,6 +18,21 @@ impl FSUtilsImpl {
 
         uri.replace('~', &self.home_path).into()
     }
+
+    pub fn create_log_file(&self, log_path: &str) -> std::path::PathBuf {
+        let path = self.get_path(log_path);
+
+        if log_path.ends_with('/') {
+            let _ = self.create_dir_all(log_path);
+            return path.join("gitlab-ci-ls.log");
+        }
+
+        if let Some(parent) = path.parent() {
+            let _ = self.create_dir_all(parent.to_str().unwrap());
+        }
+
+        path
+    }
 }
 
 impl FSUtils for FSUtilsImpl {

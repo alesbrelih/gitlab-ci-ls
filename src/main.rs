@@ -114,13 +114,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let home_path = std::env::var("HOME")?;
     let fs_utils = FSUtilsImpl::new(home_path);
 
-    let path = fs_utils.get_path(&init_params.initialization_options.log_path);
-    if let Some(dir_path) = path.parent() {
-        let _ = fs_utils.create_dir_all(dir_path.to_str().unwrap_or_default());
-    }
-
     simple_logging::log_to_file(
-        fs_utils.get_path(&init_params.initialization_options.log_path),
+        fs_utils.create_log_file(&init_params.initialization_options.log_path),
         LevelFilter::Warn,
     )?;
 
