@@ -1,5 +1,3 @@
-use std::usize;
-
 use log::error;
 use lsp_types::Position;
 use tree_sitter::{Node, Query, QueryCursor};
