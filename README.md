@@ -21,6 +21,12 @@ It is intended to be used alongside `yaml-language-server` (yamlls), providing s
 It also supports jump to included files. In case it is a remote file it tries to downloading using
 current workspace git setup and caches it locally.
 
+## Showcase
+
+Note that this video doesn't include all functionalities.
+
+[Watch the video](https://vimeo.com/966578794)
+
 ## Configuration
 
 Initialization options:
