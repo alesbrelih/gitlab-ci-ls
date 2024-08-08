@@ -198,7 +198,7 @@ impl ParserImpl {
 
                 // Handle the edge case for 'extends' if it does not exist in the second node.
                 if base_map.contains_key("extends") && !other_map.contains_key("extends") {
-                    merged_map.remove(&serde_yaml::Value::String("extends".to_string()));
+                    merged_map.remove(serde_yaml::Value::String("extends".to_string()));
                 }
 
                 serde_yaml::Value::Mapping(merged_map)
