@@ -26,12 +26,6 @@ jobs:
     strategy:
       matrix:
         build:
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            cross: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            cross: true
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             cross: false
@@ -141,8 +135,6 @@ jobs:
       - name: Prepare GitHub Release artifacts
         run: |
           mkdir ./dist
-          mv ./artifacts/x86_64-apple-darwin ./dist
-          mv ./artifacts/aarch64-apple-darwin ./dist
           mv ./artifacts/x86_64-unknown-linux-gnu ./dist
 
       - name: Combine checksums
