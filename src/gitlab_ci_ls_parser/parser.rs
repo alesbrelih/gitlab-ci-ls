@@ -55,7 +55,7 @@ struct Project {
     project: String,
 
     #[serde(rename = "ref")]
-    reference: String,
+    reference: Option<String>,
     file: Vec<String>,
 }
 
@@ -531,7 +531,7 @@ impl Parser for ParserImpl {
                     IncludeItem::Project(node) => {
                         let remote_files = match self.git.fetch_remote_repository(
                             node.project.as_str(),
-                            node.reference.as_str(),
+                            node.reference.as_deref(),
                             node.file,
                         ) {
                             Ok(rf) => rf,

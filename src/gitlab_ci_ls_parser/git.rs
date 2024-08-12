@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::Write,
-    path,
+    path::{self, Path},
     process::Command,
     time::Duration,
 };
@@ -16,11 +16,11 @@ use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
 
 pub trait Git {
-    fn clone_repo(&self, repo_dest: &str, remote_tag: &str, remote_pkg: &str);
+    fn clone_repo(&self, repo_dest: &str, remote_tag: Option<&str>, remote_pkg: &str);
     fn fetch_remote_repository(
         &self,
         remote_pkg: &str,
-        remote_tag: &str,
+        remote_tag: Option<&str>,
         remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>>;
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
@@ -102,7 +102,7 @@ impl GitImpl {
 }
 
 impl Git for GitImpl {
-    fn clone_repo(&self, repo_dest: &str, remote_tag: &str, remote_pkg: &str) {
+    fn clone_repo(&self, repo_dest: &str, remote_tag: Option<&str>, remote_pkg: &str) {
         let repo_dest_path = std::path::Path::new(repo_dest);
 
         info!("repo_path: {:?}", repo_dest_path);
@@ -132,15 +132,12 @@ impl Git for GitImpl {
 
         for origin in remotes {
             match Command::new("git")
-                .args([
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--branch",
-                    remote_tag,
-                    format!("{origin}{remote_pkg}").as_str(),
-                    repo_dest,
-                ])
+                .args(
+                    ["clone", "--depth", "1"]
+                        .into_iter()
+                        .chain(remote_tag.into_iter().flat_map(|tag| ["--branch", tag]))
+                        .chain([&format!("{origin}{remote_pkg}"), repo_dest]),
+                )
                 .output()
             {
                 Ok(ok) => {
@@ -163,17 +160,29 @@ impl Git for GitImpl {
     fn fetch_remote_repository(
         &self,
         remote_pkg: &str,
-        remote_tag: &str,
+        remote_tag: Option<&str>,
         remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>> {
-        if remote_tag.is_empty() || remote_pkg.is_empty() || remote_files.is_empty() {
+        if remote_tag.is_some() && remote_tag.unwrap().is_empty() || remote_pkg.is_empty() || remote_files.is_empty() {
             return Ok(vec![]);
         }
 
         self.fs_utils.create_dir_all(&self.cache_path)?;
 
         // check if we have that reference to repository
-        let repo_dest = format!("{}{}/{}", &self.cache_path, remote_pkg, remote_tag);
+        let repo_dest = {
+            let mut path = Path::new(&self.cache_path).join(remote_pkg);
+
+            // if we have a tag, add it to the path
+            if let Some(tag) = remote_tag {
+                path = path.join(tag);
+            }
+
+            match path.to_str() {
+                Some(path) => path.to_string(),
+                None => return Err(anyhow::anyhow!("invalid path")),
+            }
+        };
 
         self.clone_repo(repo_dest.as_str(), remote_tag, remote_pkg);
 
