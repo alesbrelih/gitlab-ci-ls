@@ -204,7 +204,8 @@ fn save_base_files(
 }
 
 fn get_remote_hosts(remote: &str) -> Option<String> {
-    let re = Regex::new(r"^(ssh://)?([^:\s/]+@[^:/]+(?::\d+)?[:/])").expect("Invalid REGEX");
+    let re = Regex::new(r"^(ssh://)?([^:\s/]+@[^:/]+(?::\d+)?[:/])|(https://[^:/]+[:/])").expect("Invalid REGEX");
+
     let captures = re.captures(remote)?;
 
     Some(captures[0].to_string())
@@ -227,6 +228,22 @@ mod tests {
         assert_eq!(
             get_remote_hosts("git@something.host.online:myrepo/wow.git"),
             Some("git@something.host.online:".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_remote_urls_https() {
+        assert_eq!(
+            get_remote_hosts("https://gitlab.com/group/othergroup/project.git"),
+            Some("https://gitlab.com/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_remote_urls_https_custom_instance() {
+        assert_eq!(
+            get_remote_hosts("https://gitlab.instance.com/group/othergroup/project.git"),
+            Some("https://gitlab.instance.com/".to_string())
         );
     }
 }
