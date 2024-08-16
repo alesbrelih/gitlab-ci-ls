@@ -204,7 +204,8 @@ fn save_base_files(
 }
 
 fn get_remote_hosts(remote: &str) -> Option<String> {
-    let re = Regex::new(r"^(ssh://)?([^:\s/]+@[^:/]+(?::\d+)?[:/])|(https://[^:/]+[:/])").expect("Invalid REGEX");
+    let re = Regex::new(r"^(ssh://)?([^:\s/]+@[^:/]+(?::\d+)?[:/])|(https://[^:/]+[:/])")
+        .expect("Invalid REGEX");
 
     let captures = re.captures(remote)?;
 
