@@ -10,7 +10,7 @@ use std::{
 use super::{
     fs_utils::{self, FSUtils},
     parser_utils::{self, ComponentInfo, ParserUtils},
-    GitlabElement, GitlabFile,
+    GitlabElement, GitlabFile, DEFAULT_BRANCH_SUBFOLDER,
 };
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
@@ -99,6 +99,26 @@ impl GitImpl {
             }
         };
     }
+
+    fn get_clone_repo_destination(
+        cache_path: &str,
+        remote_pkg: &str,
+        remote_tag: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let mut path = Path::new(cache_path).join(remote_pkg);
+
+        // if we have a tag, add it to the path
+        if let Some(tag) = remote_tag {
+            path = path.join(tag);
+        } else {
+            path = path.join(DEFAULT_BRANCH_SUBFOLDER);
+        }
+
+        match path.to_str() {
+            Some(path) => Ok(path.to_string()),
+            None => Err(anyhow::anyhow!("invalid path")),
+        }
+    }
 }
 
 impl Git for GitImpl {
@@ -163,26 +183,14 @@ impl Git for GitImpl {
         remote_tag: Option<&str>,
         remote_files: Vec<String>,
     ) -> anyhow::Result<Vec<GitlabFile>> {
-        if remote_tag.is_some() && remote_tag.unwrap().is_empty() || remote_pkg.is_empty() || remote_files.is_empty() {
+        if remote_pkg.is_empty() || remote_files.is_empty() {
             return Ok(vec![]);
         }
 
         self.fs_utils.create_dir_all(&self.cache_path)?;
 
-        // check if we have that reference to repository
-        let repo_dest = {
-            let mut path = Path::new(&self.cache_path).join(remote_pkg);
-
-            // if we have a tag, add it to the path
-            if let Some(tag) = remote_tag {
-                path = path.join(tag);
-            }
-
-            match path.to_str() {
-                Some(path) => path.to_string(),
-                None => return Err(anyhow::anyhow!("invalid path")),
-            }
-        };
+        let repo_dest =
+            GitImpl::get_clone_repo_destination(&self.cache_path, remote_pkg, remote_tag)?;
 
         self.clone_repo(repo_dest.as_str(), remote_tag, remote_pkg);
 
@@ -303,5 +311,36 @@ impl Git for GitImpl {
 
         GitImpl::clone_component_repo(repo_dest.as_str(), &component_info);
         ParserUtils::get_component(&repo_dest, &component_info.component)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_clone_repo_destination_no_tag() {
+        let cache_path = "/home/test/.cache/gitlab-ci-ls/";
+        let remote_pkg = "repo/project";
+        let tag = None;
+
+        let repo_dest = GitImpl::get_clone_repo_destination(cache_path, remote_pkg, tag);
+        assert_eq!(
+            repo_dest.unwrap(),
+            "/home/test/.cache/gitlab-ci-ls/repo/project/default"
+        );
+    }
+
+    #[test]
+    fn test_get_clone_repo_destination_with_tag() {
+        let cache_path = "/home/test/.cache/gitlab-ci-ls/";
+        let remote_pkg = "repo/project";
+        let tag = Some("1.0.0");
+
+        let repo_dest = GitImpl::get_clone_repo_destination(cache_path, remote_pkg, tag);
+        assert_eq!(
+            repo_dest.unwrap(),
+            "/home/test/.cache/gitlab-ci-ls/repo/project/1.0.0"
+        );
     }
 }
