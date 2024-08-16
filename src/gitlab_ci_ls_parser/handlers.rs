@@ -12,7 +12,7 @@ use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
     parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition, PrepareRenameResult,
-    RenameResult,
+    RenameResult, DEFAULT_BRANCH_SUBFOLDER,
 };
 
 use super::{
@@ -467,7 +467,11 @@ impl LSPHandlers {
                 let file = remote.file?;
                 let file = parser_utils::ParserUtils::strip_quotes(&file).trim_start_matches('/');
 
-                let path = format!("{}/{}/{}", remote.project?, remote.reference?, file);
+                let path = if let Some(reference) = remote.reference {
+                    format!("{}/{}/{}", remote.project?, reference, file)
+                } else {
+                    format!("{}/{}/{}", remote.project?, DEFAULT_BRANCH_SUBFOLDER, file)
+                };
 
                 store
                     .keys()

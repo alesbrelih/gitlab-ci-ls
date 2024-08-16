@@ -158,7 +158,7 @@ pub struct RemoteInclude {
 
 impl RemoteInclude {
     pub fn is_valid(&self) -> bool {
-        self.project.is_some() && self.reference.is_some() && self.file.is_some()
+        self.project.is_some() && self.file.is_some()
     }
 }
 
@@ -261,3 +261,5 @@ pub struct Component {
     pub local_path: String,
     pub inputs: Vec<ComponentInput>,
 }
+
+const DEFAULT_BRANCH_SUBFOLDER: &str = "default";
