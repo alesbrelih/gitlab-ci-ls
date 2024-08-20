@@ -4,9 +4,9 @@ use tree_sitter::{Node, Query, QueryCursor};
 
 use super::{
     parser, parser_utils::ParserUtils, treesitter_queries::TreesitterQueries, Component,
-    ComponentInput, ComponentInputValueBlock, ComponentInputValuePlain, GitlabComponentElement,
-    GitlabElement, GitlabInputElement, Include, IncludeInformation, LSPPosition, NodeDefinition,
-    Range, RemoteInclude, RuleReference,
+    ComponentInput, ComponentInputValueBlock, ComponentInputValuePlain, GitlabCacheElement,
+    GitlabComponentElement, GitlabElement, GitlabInputElement, Include, IncludeInformation,
+    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
 };
 
 // TODO: initialize tree only once
@@ -17,6 +17,7 @@ pub trait Treesitter {
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
+    fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_all_rule_references(
         &self,
@@ -1090,6 +1091,83 @@ impl Treesitter for TreesitterImpl {
         }
 
         None
+    }
+
+    fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::language())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::language(),
+            &TreesitterQueries::get_all_caches(),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let cache_node_index = query.capture_index_for_name("cache_node").unwrap();
+        let cache_item = query.capture_index_for_name("cache_item").unwrap();
+
+        let mut components = vec![];
+        for m in matches {
+            let mut node = GitlabCacheElement {
+                key: "cache".to_string(),
+                uri: uri.to_string(),
+                ..Default::default()
+            };
+
+            for c in m.captures {
+                let text = content[c.node.byte_range()].to_string();
+                match c.index {
+                    idx if idx == cache_node_index => {
+                        node.content = Some(text);
+                        node.range = Range {
+                            start: LSPPosition {
+                                line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.start_position().column)
+                                    .unwrap_or(0),
+                            },
+                            end: LSPPosition {
+                                line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(c.node.end_position().column).unwrap_or(0),
+                            },
+                        };
+                    }
+                    idx if idx == cache_item => {
+                        let cache_item = GitlabElement {
+                            uri: uri.to_string(),
+                            content: Some(text.clone()),
+                            key: ParserUtils::strip_quotes(&text).to_string(),
+                            range: Range {
+                                start: LSPPosition {
+                                    line: u32::try_from(c.node.start_position().row).unwrap_or(0),
+                                    character: u32::try_from(c.node.start_position().column)
+                                        .unwrap_or(0),
+                                },
+                                end: LSPPosition {
+                                    line: u32::try_from(c.node.end_position().row).unwrap_or(0),
+                                    character: u32::try_from(c.node.end_position().column)
+                                        .unwrap_or(0),
+                                },
+                            },
+                        };
+
+                        node.cache_items.push(cache_item);
+                    }
+                    _ => {}
+                }
+            }
+
+            components.push(node);
+        }
+
+        components
     }
 }
 
@@ -2207,5 +2285,36 @@ job_one:
             }
             _ => panic!("invalid type"),
         }
+    }
+
+    #[test]
+    fn test_get_all_multi_caches() {
+        let cnt = r"
+    job_one:
+      image: alpine
+      extends: .first
+      stage: one
+      cache:
+        - key:
+            files:
+              - ./package.json
+          paths:
+            - ./node_modules
+        - key:
+            files:
+              - ./package.json
+          paths:
+            - ./node_modules
+      needs:
+        - job: job_one
+    ";
+
+        let uri = "file://mocked";
+
+        let treesitter = TreesitterImpl::new();
+        let all_multi_caches = treesitter.get_all_multi_caches(uri, cnt);
+
+        assert_eq!(1, all_multi_caches.len());
+        assert_eq!(2, all_multi_caches[0].cache_items.len());
     }
 }

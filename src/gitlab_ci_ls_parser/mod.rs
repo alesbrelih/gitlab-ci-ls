@@ -108,6 +108,15 @@ pub struct GitlabElement {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct GitlabCacheElement {
+    pub key: String,
+    pub content: Option<String>,
+    pub uri: String,
+    pub range: Range,
+    pub cache_items: Vec<GitlabElement>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct GitlabInputElement {
     pub key: String,
     pub content: Option<String>,
@@ -263,3 +272,4 @@ pub struct Component {
 }
 
 const DEFAULT_BRANCH_SUBFOLDER: &str = "default";
+const MAX_CACHE_ITEMS: usize = 4;

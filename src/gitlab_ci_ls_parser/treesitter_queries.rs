@@ -779,4 +779,19 @@ impl TreesitterQueries {
         "#
         .to_string()
     }
+
+    pub fn get_all_caches() -> String {
+        r#"
+        (
+            block_mapping (
+            block_mapping_pair
+                key: (flow_node (plain_scalar(string_scalar)@cache_key))
+                value: (block_node(block_sequence(block_sequence_item)+@cache_item))
+
+            (#eq? @cache_key "cache")
+            ) @cache_node
+        )
+        "#
+        .to_string()
+    }
 }

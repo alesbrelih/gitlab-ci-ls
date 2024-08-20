@@ -6,8 +6,9 @@ use lsp_types::{Position, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabComponentElement,
-    GitlabElement, GitlabFile, IncludeInformation, NodeDefinition, ParseResults, RuleReference,
+    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabCacheElement,
+    GitlabComponentElement, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition,
+    ParseResults, RuleReference,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,6 +102,7 @@ pub trait Parser {
         rule_name: Option<&str>,
     ) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
+    fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
@@ -644,5 +646,9 @@ impl Parser for ParserImpl {
 
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
         self.treesitter.get_root_node_key(uri, content, node_key)
+    }
+
+    fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
+        self.treesitter.get_all_multi_caches(uri, content)
     }
 }

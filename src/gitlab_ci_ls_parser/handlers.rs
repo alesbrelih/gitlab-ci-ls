@@ -12,7 +12,7 @@ use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
     parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition, PrepareRenameResult,
-    RenameResult, DEFAULT_BRANCH_SUBFOLDER,
+    RenameResult, DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
 };
 
 use super::{
@@ -1156,6 +1156,28 @@ impl LSPHandlers {
                 });
             }
         }
+
+        let caches = self
+            .parser
+            .get_all_multi_caches(document_uri.as_ref(), content.as_str());
+
+        let cache_diagnostics = caches.iter().flat_map(|c| c.cache_items.iter().skip(MAX_CACHE_ITEMS).map(|el| {
+                Diagnostic::new_simple(
+                    lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: el.range.start.line,
+                            character: el.range.start.character,
+                        },
+                        end: lsp_types::Position {
+                            line: el.range.end.line,
+                            character: el.range.end.character,
+                        },
+                    },
+                    "You can have a maximum of 4 caches: https://docs.gitlab.com/ee/ci/caching/#use-multiple-caches".to_string(),
+                )
+            }));
+
+        diagnostics.extend(cache_diagnostics);
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(DiagnosticsNotification {
