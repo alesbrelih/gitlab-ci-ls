@@ -3,6 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
 
+import { execSync } from "child_process";
 import { ExtensionContext } from "vscode";
 import * as vscode from "vscode";
 
@@ -12,9 +13,10 @@ import {
   ServerOptions,
 } from "vscode-languageclient/node";
 
+const SKIP_VERSION_STATE_KEY = "skipUpdate";
 let client: LanguageClient;
 
-export function activate(_: ExtensionContext) {
+export function activate(context: ExtensionContext) {
   if (client?.isRunning()) {
     return;
   }
@@ -51,6 +53,68 @@ export function activate(_: ExtensionContext) {
 
   // Start the client. This will also launch the server
   client.start();
+
+  checkUpdates(context, config.get("executablePath"));
+}
+
+async function checkUpdates(
+  context: ExtensionContext,
+  executable: string,
+): Promise<void> {
+  const res = await fetch(
+    "https://api.github.com/repos/alesbrelih/gitlab-ci-ls/releases/latest",
+  );
+
+  // js is perfect
+  const { tag_name } = (await res.json()) as any;
+
+  //check if skipped
+  const val = context.globalState.get(SKIP_VERSION_STATE_KEY);
+  if (val && val === tag_name) {
+    return;
+  }
+
+  const version = execSync(`${executable} --version`).toString();
+
+  // older version which doesn't support --version
+  if (!version) {
+    return;
+  }
+
+  // format of: gitlab-ci-ls X.X.X
+  const versionSplit = version.split(" ");
+
+  // shouldn't occur
+  if (versionSplit.length != 2) {
+    return;
+  }
+
+  const versionTag = versionSplit[1].trim();
+
+  if (tag_name != versionTag) {
+    vscode.window
+      .showInformationMessage(
+        "There is a newer version of Gitlab CI language server.",
+        "Show installation guide",
+        "Show changes",
+        "Skip this version",
+      )
+      .then((answer) => {
+        let url = "";
+        if (answer === "Show changes") {
+          url = `https://github.com/alesbrelih/gitlab-ci-ls/compare/${versionTag}...${tag_name}`;
+        } else if (answer === "Show installation guide") {
+          url =
+            "https://github.com/alesbrelih/gitlab-ci-ls?tab=readme-ov-file#installation";
+        } else if (answer === "Skip this version") {
+          context.globalState.update(SKIP_VERSION_STATE_KEY, tag_name);
+        }
+
+        if (url != "") {
+          vscode.env.openExternal(vscode.Uri.parse(url));
+        }
+      });
+  }
 }
 
 export function deactivate(): Thenable<void> | undefined {

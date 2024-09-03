@@ -3,7 +3,7 @@
   "description": "Gitlab CI Language Server",
   "author": "Ales Brelih",
   "license": "MIT",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/alesbrelih/gitlab-ci-ls"
