@@ -67,6 +67,16 @@ impl LSPHandlers {
         events
     }
 
+    fn default_stages() -> Vec<String> {
+        vec![
+            ".pre".to_string(),
+            "build".to_string(),
+            "test".to_string(),
+            "deploy".to_string(),
+            ".post".to_string(),
+        ]
+    }
+
     // When renaming or some other action that will be handled later on we need
     // to prevent modifications on cached/downloaded files.
     fn can_path_be_modified(&self, path: &str) -> bool {
@@ -642,10 +652,20 @@ impl LSPHandlers {
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        let stages = self
-            .stages
-            .lock()
-            .map_err(|e| anyhow::anyhow!("failed to lock stages: {}", e))?;
+        let stages = {
+            let locked_stages = self
+                .stages
+                .lock()
+                .map_err(|e| anyhow::anyhow!("failed to lock stages: {}", e))?;
+
+            let keys: Vec<_> = locked_stages.keys().map(ToString::to_string).collect();
+
+            if keys.is_empty() {
+                LSPHandlers::default_stages()
+            } else {
+                keys
+            }
+        };
 
         let word = parser_utils::ParserUtils::word_before_cursor(
             line,
@@ -658,11 +678,11 @@ impl LSPHandlers {
             });
 
         let items = stages
-            .keys()
+            .iter()
             .filter(|stage| stage.contains(word))
             .flat_map(|stage| -> anyhow::Result<LSPCompletion> {
                 Ok(LSPCompletion {
-                    label: stage.clone(),
+                    label: stage.to_string(),
                     details: None,
                     location: LSPLocation {
                         range: Range {
@@ -1042,9 +1062,20 @@ impl LSPHandlers {
             .parser
             .get_all_stages(document_uri.as_ref(), content.as_str(), None);
 
-        let all_stages = self.stages.lock().unwrap();
+        let all_stages = {
+            let locked_stages = self.stages.lock().unwrap();
+
+            let keys: Vec<_> = locked_stages.keys().map(ToString::to_string).collect();
+
+            if keys.is_empty() {
+                LSPHandlers::default_stages()
+            } else {
+                keys
+            }
+        };
+
         for stage in stages {
-            if all_stages.get(&stage.key).is_none() {
+            if !all_stages.contains(&stage.key) {
                 diagnostics.push(Diagnostic::new_simple(
                     lsp_types::Range {
                         start: lsp_types::Position {
