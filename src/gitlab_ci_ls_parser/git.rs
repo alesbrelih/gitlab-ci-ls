@@ -10,7 +10,7 @@ use std::{
 use super::{
     fs_utils::{self, FSUtils},
     parser_utils::{self, ComponentInfo, ParserUtils},
-    GitlabElement, GitlabFile, DEFAULT_BRANCH_SUBFOLDER,
+    GitlabElement, GitlabFile, ProjectFile, DEFAULT_BRANCH_SUBFOLDER,
 };
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
@@ -21,7 +21,7 @@ pub trait Git {
         &self,
         remote_pkg: &str,
         remote_tag: Option<&str>,
-        remote_files: Vec<String>,
+        remote_files: ProjectFile,
     ) -> anyhow::Result<Vec<GitlabFile>>;
     fn fetch_remote(&self, url: Url) -> anyhow::Result<GitlabFile>;
     fn fetch_remote_component(
@@ -181,9 +181,14 @@ impl Git for GitImpl {
         &self,
         remote_pkg: &str,
         remote_tag: Option<&str>,
-        remote_files: Vec<String>,
+        remote_files: ProjectFile,
     ) -> anyhow::Result<Vec<GitlabFile>> {
-        if remote_pkg.is_empty() || remote_files.is_empty() {
+        let files = match remote_files {
+            ProjectFile::Multi(files) => files,
+            ProjectFile::Single(single) => vec![single],
+        };
+
+        if remote_pkg.is_empty() || files.is_empty() {
             return Ok(vec![]);
         }
 
@@ -194,7 +199,7 @@ impl Git for GitImpl {
 
         self.clone_repo(repo_dest.as_str(), remote_tag, remote_pkg);
 
-        let files = remote_files
+        let files = files
             .iter()
             .filter_map(|file| {
                 let file_path = format!("{repo_dest}{file}");

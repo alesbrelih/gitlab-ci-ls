@@ -1980,6 +1980,58 @@ job_one:
     }
 
     #[test]
+    fn test_get_position_type_project_no_ref_single_file() {
+        let cnt = r#"
+include:
+  - project: myproject/name
+    file: "/resources/ci-templates/mytemplate.yml"
+  - local: ".my-local.yml"
+  - remote: "https://myremote.com/template.yml"
+
+job_one:
+  image: alpine
+  extends: .first
+  stage: one
+  variables:
+    SEARCHED: no
+    OTHER: yes
+  needs:
+    - job: job_one
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let project_file = treesitter.get_position_type(
+            cnt,
+            Position {
+                line: 3,
+                character: 13,
+            },
+        );
+
+        let want_project = "myproject/name";
+        let want_file = "\"/resources/ci-templates/mytemplate.yml\"".to_string();
+        match project_file {
+            parser::PositionType::Include(IncludeInformation {
+                remote:
+                    Some(RemoteInclude {
+                        project: Some(project),
+                        reference,
+                        file: Some(file),
+                    }),
+                local: None,
+                remote_url: None,
+                basic: None,
+                component: None,
+            }) => {
+                assert_eq!(want_project, project);
+                assert_eq!(None, reference);
+                assert_eq!(want_file, file);
+            }
+            _ => panic!("project file is invalid"),
+        }
+    }
+
+    #[test]
     fn test_get_position_type_include_local() {
         let cnt = r#"
 include:

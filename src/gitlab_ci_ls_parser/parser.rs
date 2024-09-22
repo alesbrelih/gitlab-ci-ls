@@ -3,84 +3,12 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use log::{error, info};
 use lsp_types::{Position, Url};
-use serde::{Deserialize, Serialize};
 
 use super::{
-    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, GitlabCacheElement,
-    GitlabComponentElement, GitlabElement, GitlabFile, IncludeInformation, NodeDefinition,
-    ParseResults, RuleReference,
+    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
+    GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabFile, IncludeInformation,
+    IncludeItem, IncludeNode, NodeDefinition, ParseResults, RuleReference,
 };
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ComponentSpecInput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    default: Option<serde_yaml::Value>, // Can be any type (string, number, boolean)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    type_: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    regex: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ComponentSpecInputs {
-    inputs: HashMap<String, ComponentSpecInput>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ComponentSpec {
-    spec: ComponentSpecInputs,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct IncludeNode {
-    include: Vec<IncludeItem>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)] // This attribute allows for different structs in the same Vec
-enum IncludeItem {
-    Project(Project),
-    Local(Local),
-    Remote(Remote),
-    Basic(String),
-    Component(ComponentInclude),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(clippy::struct_field_names)]
-struct Project {
-    project: String,
-
-    #[serde(rename = "ref")]
-    reference: Option<String>,
-    file: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Local {
-    local: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)] // This attribute allows for different structs in the same Vec
-pub enum InputValue {
-    Plain(String),
-    Block(serde_yaml::Value),
-}
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ComponentInclude {
-    component: String,
-    inputs: HashMap<String, InputValue>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Remote {
-    remote: String,
-}
 
 pub trait Parser {
     fn get_all_extends(

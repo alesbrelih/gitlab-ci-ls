@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use lsp_server::RequestId;
-use lsp_types::{Diagnostic, Position, TextEdit, Url};
+use lsp_types::{Diagnostic, TextEdit, Url};
+use serde::{Deserialize, Serialize};
 
 pub mod fs_utils;
 pub mod git;
@@ -269,6 +270,84 @@ pub struct Component {
     pub uri: String,
     pub local_path: String,
     pub inputs: Vec<ComponentInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpecInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default: Option<serde_yaml::Value>, // Can be any type (string, number, boolean)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    regex: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpecInputs {
+    inputs: HashMap<String, ComponentSpecInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ComponentSpec {
+    spec: ComponentSpecInputs,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IncludeNode {
+    include: Vec<IncludeItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)] // This attribute allows for different structs in the same Vec
+pub enum IncludeItem {
+    Project(Project),
+    Local(Local),
+    Remote(Remote),
+    Basic(String),
+    Component(ComponentInclude),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)] // This attribute allows for different structs in the same Vec
+pub enum ProjectFile {
+    Single(String),
+    Multi(Vec<String>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::struct_field_names)]
+pub struct Project {
+    project: String,
+
+    #[serde(rename = "ref")]
+    reference: Option<String>,
+    file: ProjectFile,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Local {
+    local: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)] // This attribute allows for different structs in the same Vec
+pub enum InputValue {
+    Plain(String),
+    Block(serde_yaml::Value),
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ComponentInclude {
+    component: String,
+    inputs: HashMap<String, InputValue>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Remote {
+    remote: String,
 }
 
 const DEFAULT_BRANCH_SUBFOLDER: &str = "default";
