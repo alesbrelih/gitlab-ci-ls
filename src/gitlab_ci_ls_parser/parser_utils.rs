@@ -82,7 +82,7 @@ impl ParserUtils {
         }
 
         let start = line[..char_index]
-            .rfind(|c: char| c == '$' || c == '{')
+            .rfind(['$', '{'])
             .map_or(0, |index| index + 1);
 
         let end = line[char_index..]
