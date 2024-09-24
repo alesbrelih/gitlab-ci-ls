@@ -1,4 +1,4 @@
-use log::{error, warn};
+use log::error;
 use lsp_types::Position;
 use tree_sitter::{Node, Query, QueryCursor};
 
@@ -80,7 +80,7 @@ impl TreesitterImpl {
             .iter()
             .find(|c| c.index == full_component_index)
         else {
-            error!("couldn't find index {full_component_index} even though its remote capture");
+            error!("couldn't find index {full_component_index} even though its component capture");
 
             return None;
         };
@@ -93,7 +93,8 @@ impl TreesitterImpl {
             for c in mat.captures {
                 match c.index {
                     idx if idx == component_uri_index => {
-                        component.uri = content[c.node.byte_range()].to_string();
+                        let value = content[c.node.byte_range()].to_string();
+                        component.uri = ParserUtils::strip_quotes(&value).to_string();
                     }
                     idx if idx == component_input_index => {
                         if let Some(i) = input {
@@ -106,7 +107,7 @@ impl TreesitterImpl {
                             && position.character as usize <= c.node.end_position().column;
 
                         input = Some(ComponentInput {
-                            key,
+                            key: ParserUtils::strip_quotes(&key).to_string(),
                             hovered,
                             ..Default::default()
                         });
@@ -118,7 +119,7 @@ impl TreesitterImpl {
                             && position.character as usize <= c.node.end_position().column;
 
                         inputs.push(ComponentInput {
-                            key,
+                            key: ParserUtils::strip_quotes(&key).to_string(),
                             hovered,
                             ..Default::default()
                         });
@@ -130,7 +131,10 @@ impl TreesitterImpl {
                                 && position.character as usize <= c.node.end_position().column;
 
                             let value = content[c.node.byte_range()].to_string();
-                            i.value_plain = ComponentInputValuePlain { value, hovered }
+                            i.value_plain = ComponentInputValuePlain {
+                                value: ParserUtils::strip_quotes(&value).to_string(),
+                                hovered,
+                            }
                         }
                     }
                     idx if idx == component_input_value_block_index => {
@@ -138,9 +142,10 @@ impl TreesitterImpl {
                             let hovered = c.node.start_position().row == position.line as usize
                                 && position.character as usize >= c.node.start_position().column
                                 && position.character as usize <= c.node.end_position().column;
+                            let value = content[c.node.byte_range()].to_string();
 
                             i.value_block = ComponentInputValueBlock {
-                                value: content[c.node.byte_range()].to_string(),
+                                value: ParserUtils::strip_quotes(&value).to_string(),
                                 hovered,
                             }
                         }

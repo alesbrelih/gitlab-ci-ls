@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use lsp_server::RequestId;
 use lsp_types::{Diagnostic, TextEdit, Url};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub mod fs_utils;
 pub mod git;
@@ -342,12 +342,32 @@ pub enum InputValue {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ComponentInclude {
     component: String,
-    inputs: HashMap<String, InputValue>,
+
+    #[serde(deserialize_with = "deserialize_inputs")]
+    inputs: Option<HashMap<String, InputValue>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Remote {
     remote: String,
+}
+
+// Custom deserializer for the `inputs` field
+#[allow(clippy::unnecessary_wraps)]
+fn deserialize_inputs<'de, D>(
+    deserializer: D,
+) -> Result<Option<HashMap<String, InputValue>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Try to deserialize into a valid HashMap
+    let result: Result<HashMap<String, InputValue>, D::Error> =
+        Deserialize::deserialize(deserializer);
+
+    match result {
+        Ok(map) => Ok(Some(map)),
+        Err(_) => Ok(None), // If deserialization fails, return None
+    }
 }
 
 const DEFAULT_BRANCH_SUBFOLDER: &str = "default";

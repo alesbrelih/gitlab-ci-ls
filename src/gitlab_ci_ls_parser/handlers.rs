@@ -1337,7 +1337,7 @@ impl LSPHandlers {
 
             let items = valid_input_autocompletes
                 .into_iter()
-                .filter(|i| i.key.starts_with(word))
+                .filter(|i| i.key.contains(word))
                 .flat_map(|i| -> anyhow::Result<LSPCompletion> {
                     Ok(LSPCompletion {
                         label: i.key.clone(),
@@ -1392,7 +1392,7 @@ impl LSPHandlers {
                 if let Some(options) = &input_spec.options {
                     let items = options
                         .iter()
-                        .filter(|option| option.starts_with(word))
+                        .filter(|option| option.contains(word))
                         .flat_map(|option| -> anyhow::Result<LSPCompletion> {
                             Ok(LSPCompletion {
                                 label: option.to_string(),

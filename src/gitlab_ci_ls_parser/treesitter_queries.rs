@@ -512,7 +512,7 @@ impl TreesitterQueries {
                         )
                         (block_mapping_pair
                             key: (flow_node(plain_scalar(string_scalar)@component_inputs_key))
-                            value: (block_node(block_mapping
+                            value: [(block_node(block_mapping
                             [
                                 (
                                   block_mapping_pair
@@ -525,7 +525,7 @@ impl TreesitterQueries {
                                 )*
                                 (ERROR(flow_node(plain_scalar(string_scalar)@component_input_error)))*
                             ]
-                            ))
+                            ))(flow_node)@component_input]
                         )
                     )
                 ) @full_component
