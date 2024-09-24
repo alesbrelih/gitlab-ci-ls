@@ -1,7 +1,7 @@
 name: Release
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * 1"
   workflow_dispatch:
 
 # Allow only one release workflow at a time to avoid using shared resources (tags, ...).
