@@ -53,6 +53,36 @@ impl GitImpl {
         }
     }
 
+    fn is_valid_semver(s: &str) -> bool {
+        let parts: Vec<&str> = s.split('.').collect();
+
+        if parts.len() < 3 {
+            return false;
+        }
+
+        for part in &parts {
+            if !part.chars().all(|c| c.is_ascii_digit()) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn is_valid_commit_hash(s: &str) -> bool {
+        let len = s.len();
+
+        if !(7..=40).contains(&len) {
+            return false;
+        }
+
+        s.chars().all(|c| c.is_ascii_hexdigit())
+    }
+
+    fn is_not_semver_or_commit_hash(s: &str) -> bool {
+        !(GitImpl::is_valid_semver(s) || GitImpl::is_valid_commit_hash(s))
+    }
+
     fn clone_component_repo(repo_dest: &str, component_info: &ComponentInfo) {
         let repo_dest_path = std::path::Path::new(&repo_dest);
 
@@ -139,6 +169,20 @@ impl Git for GitImpl {
             if repo_contents.next().is_some() {
                 info!("repo contents exist");
 
+                // TODO: introduce short timeout
+                if remote_tag.is_none()
+                    || GitImpl::is_not_semver_or_commit_hash(remote_tag.unwrap())
+                {
+                    match Command::new("git").args(["-C", repo_dest, "pull"]).output() {
+                        Ok(_) => info!("{repo_dest}: successfully updated using git clone"),
+                        Err(err) => {
+                            error!("error using git clone inside: {repo_dest}; got: {err:?}");
+                        }
+                    }
+                } else {
+                    info!("skipping git pull on {repo_dest}; ref: {remote_tag:?}; because either remote ref isn't defined or reference is a commit hash or a semver tag");
+                }
+
                 return;
             }
         }
@@ -151,6 +195,8 @@ impl Git for GitImpl {
         info!("got git host: {:?}", remotes);
 
         for origin in remotes {
+            // FIX: fix this because it doesn't work if reference is a commit hash
+            // in this case I need to only clone without branch and then checkout the commit
             match Command::new("git")
                 .args(
                     ["clone", "--depth", "1"]
