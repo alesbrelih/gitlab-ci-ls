@@ -195,19 +195,58 @@ impl Git for GitImpl {
         info!("got git host: {:?}", remotes);
 
         for origin in remotes {
-            // FIX: fix this because it doesn't work if reference is a commit hash
-            // in this case I need to only clone without branch and then checkout the commit
             match Command::new("git")
                 .args(
                     ["clone", "--depth", "1"]
                         .into_iter()
-                        .chain(remote_tag.into_iter().flat_map(|tag| ["--branch", tag]))
+                        .chain(remote_tag.into_iter().flat_map(|tag| {
+                            // Reference/commit can't be checked out this way
+                            if GitImpl::is_valid_commit_hash(tag) {
+                                vec![]
+                            } else {
+                                vec!["--branch", tag]
+                            }
+                        }))
                         .chain([&format!("{origin}{remote_pkg}"), repo_dest]),
                 )
                 .output()
             {
                 Ok(ok) => {
                     info!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
+                    if let Some(tag) = remote_tag {
+                        if GitImpl::is_valid_commit_hash(tag) {
+                            match Command::new("git")
+                                .args(["fetch", "--depth", "1", &origin, tag])
+                                .output()
+                            {
+                                Ok(_) => {
+                                    info!("successfully fetched referenced commit: {repo_dest} @ {tag};");
+
+                                    info!("trying to checkout the commit");
+                                    match Command::new("git")
+                                        .args(["-C", repo_dest, "checkout", tag])
+                                        .output()
+                                    {
+                                        Ok(_) => {
+                                            info!(
+                                                "successfully checkout repo: {repo_dest} @ {tag}"
+                                            );
+                                        }
+                                        Err(err) => {
+                                            error!("error checking out repo: {repo_dest} @ {tag}; got err: {err}");
+                                            fs::remove_dir_all(repo_dest)
+                                                .expect("should be able to remove");
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    error!("error fetching referenced commit repo: {repo_dest} @ {tag}; got err: {err}");
+                                    fs::remove_dir_all(repo_dest)
+                                        .expect("should be able to remove");
+                                }
+                            }
+                        }
+                    }
                     break;
                 }
                 Err(err) => {
