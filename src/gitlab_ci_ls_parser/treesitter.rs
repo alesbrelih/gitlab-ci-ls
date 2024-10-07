@@ -1,5 +1,6 @@
 use log::error;
 use lsp_types::Position;
+use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
 
 use super::{
@@ -200,9 +201,9 @@ impl Treesitter for TreesitterImpl {
         };
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -245,10 +246,10 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut root_nodes = vec![];
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut node = GitlabElement {
                 uri: uri.to_string(),
                 ..Default::default()
@@ -289,10 +290,10 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut environments = vec![];
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -344,10 +345,10 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut stages = vec![];
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -399,12 +400,12 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut extends: Vec<GitlabElement> = vec![];
 
         let valid_indexes: Vec<u32> = vec![1, 2];
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if valid_indexes.contains(&c.index) {
                     let text = &content[c.node.byte_range()];
@@ -461,11 +462,11 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut extends: Vec<GitlabElement> = vec![];
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 1 {
                     let text = &content[c.node.byte_range()];
@@ -508,7 +509,7 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut remote_include = RemoteInclude {
             ..Default::default()
@@ -542,7 +543,7 @@ impl Treesitter for TreesitterImpl {
             .unwrap();
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             // If this is a remote reference capture, I need to capture multiple values
             // reference,project,file
             // because the way treesitter captures those groups it doesn't really capture all
@@ -555,7 +556,7 @@ impl Treesitter for TreesitterImpl {
             // If its component
             if mat.captures.iter().any(|c| c.index == full_component_index) {
                 if let Some(position_type) = TreesitterImpl::get_position_type_component(
-                    &mat,
+                    mat,
                     position,
                     content,
                     full_component_index,
@@ -698,11 +699,11 @@ impl Treesitter for TreesitterImpl {
         )
         .unwrap();
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut needs: Vec<GitlabElement> = vec![];
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 2 {
                     let text = &content[c.node.byte_range()];
@@ -749,28 +750,31 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        matches
-            .into_iter()
-            .flat_map(|m| m.captures.iter())
-            .find(|c| {
-                c.index == 1
-                    && c.node.start_position().row <= position.line as usize
-                    && c.node.end_position().row >= position.line as usize
-            })
-            .map(|c| {
-                let text = content[c.node.byte_range()].to_string();
-                let key = text.lines().collect::<Vec<&str>>()[0]
-                    .trim_end_matches(':')
-                    .to_string();
+        while let Some(m) = matches.next() {
+            // Iterate through the captures for this match
+            for capture in m.captures {
+                if capture.index == 1
+                    && capture.node.start_position().row <= position.line as usize
+                    && capture.node.end_position().row >= position.line as usize
+                {
+                    // Extract the text and create the GitlabElement
+                    let text = content[capture.node.byte_range()].to_string();
+                    let key = text.lines().collect::<Vec<&str>>()[0]
+                        .trim_end_matches(':')
+                        .to_string();
 
-                GitlabElement {
-                    key,
-                    content: Some(text),
-                    ..Default::default()
+                    return Some(GitlabElement {
+                        key,
+                        content: Some(text),
+                        ..Default::default()
+                    });
                 }
-            })
+            }
+        }
+
+        None
     }
 
     fn job_variable_definition(
@@ -795,27 +799,36 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        matches
-            .into_iter()
-            .flat_map(|m| m.captures.iter())
-            .find(|c| c.index == 2)
-            .map(|c| GitlabElement {
-                uri: uri.to_string(),
-                key: ParserUtils::strip_quotes(&content[c.node.byte_range()]).to_string(),
-                content: None,
-                range: Range {
-                    start: LSPPosition {
-                        line: u32::try_from(c.node.start_position().row).unwrap_or(0),
-                        character: u32::try_from(c.node.start_position().column).unwrap_or(0),
-                    },
-                    end: LSPPosition {
-                        line: u32::try_from(c.node.end_position().row).unwrap_or(0),
-                        character: u32::try_from(c.node.end_position().column).unwrap_or(0),
-                    },
-                },
-            })
+        while let Some(m) = matches.next() {
+            // Iterate over the captures for this match
+            for capture in m.captures {
+                if capture.index == 2 {
+                    // Found the match, now create and return the GitlabElement
+                    return Some(GitlabElement {
+                        uri: uri.to_string(),
+                        key: ParserUtils::strip_quotes(&content[capture.node.byte_range()])
+                            .to_string(),
+                        content: None,
+                        range: Range {
+                            start: LSPPosition {
+                                line: u32::try_from(capture.node.start_position().row).unwrap_or(0),
+                                character: u32::try_from(capture.node.start_position().column)
+                                    .unwrap_or(0),
+                            },
+                            end: LSPPosition {
+                                line: u32::try_from(capture.node.end_position().row).unwrap_or(0),
+                                character: u32::try_from(capture.node.end_position().column)
+                                    .unwrap_or(0),
+                            },
+                        },
+                    });
+                }
+            }
+        }
+
+        None
     }
 
     fn get_component_spec_inputs(&self, content: &str) -> Option<String> {
@@ -834,10 +847,10 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
         let spec_index = query.capture_index_for_name("spec").unwrap();
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == spec_index {
                     return Some(content[c.node.byte_range()].to_string());
@@ -865,7 +878,7 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let component_uri_index = query.capture_index_for_name("component_uri").unwrap();
         let component_input_index = query.capture_index_for_name("component_input").unwrap();
@@ -882,7 +895,7 @@ impl Treesitter for TreesitterImpl {
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
 
         let mut components = vec![];
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut node = GitlabComponentElement {
                 uri: uri.to_string(),
                 ..Default::default()
@@ -1012,11 +1025,11 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let mut extends: Vec<GitlabElement> = vec![];
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 2 {
                     let text = &content[c.node.byte_range()];
@@ -1069,9 +1082,9 @@ impl Treesitter for TreesitterImpl {
         };
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
-        for mat in matches {
+        while let Some(mat) = matches.next() {
             for c in mat.captures {
                 if c.index == 0 {
                     let text = &content[c.node.byte_range()];
@@ -1114,13 +1127,13 @@ impl Treesitter for TreesitterImpl {
         .unwrap();
 
         let mut cursor_qry = QueryCursor::new();
-        let matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
 
         let cache_node_index = query.capture_index_for_name("cache_node").unwrap();
         let cache_item = query.capture_index_for_name("cache_item").unwrap();
 
         let mut components = vec![];
-        for m in matches {
+        while let Some(m) = matches.next() {
             let mut node = GitlabCacheElement {
                 key: "cache".to_string(),
                 uri: uri.to_string(),

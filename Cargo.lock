@@ -393,6 +393,7 @@ dependencies = [
  "serde_yaml",
  "simple-logging",
  "simple_logger",
+ "streaming-iterator",
  "tokio",
  "tree-sitter",
  "tree-sitter-yaml",
