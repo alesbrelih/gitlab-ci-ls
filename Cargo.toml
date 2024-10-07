@@ -21,7 +21,7 @@ serde = "1.0.210"
 tree-sitter = "0.23.0"
 tree-sitter-yaml = "0.6.1"
 reqwest = { version = "0.12.8", features = ["blocking"] }
-regex = "1.10.6"
+regex = "1.11.0"
 serde_yaml = "0.9.34"
 crc64 = "2.0.0"
 clap = { version = "4.5.19", features = ["derive"] }
