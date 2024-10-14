@@ -25,7 +25,7 @@ reqwest = { version = "0.12.8", features = ["blocking"] }
 regex = "1.11.0"
 serde_yaml = "0.9.34"
 crc64 = "2.0.0"
-clap = { version = "4.5.19", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 
 [lints.clippy]
 all = "deny"
