@@ -1,7 +1,7 @@
-use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Instant};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Instant};
 
 use anyhow::anyhow;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
     request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
@@ -19,7 +19,7 @@ use super::{
     fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, ComponentInput,
     DefinitionResult, GitlabElement, GitlabInputElement, HoverResult, IncludeInformation,
     LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
-    RuleReference,
+    RemoteInclude, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -633,6 +633,13 @@ impl LSPHandlers {
             }) => self
                 .on_completion_component(line, position, &component)
                 .ok()?,
+            parser::PositionType::Include(IncludeInformation {
+                remote: Some(remote),
+                remote_url: None,
+                local: None,
+                basic: None,
+                component: None,
+            }) => self.on_completion_remote(line, position, &remote).ok()?,
             parser::PositionType::RuleReference(_) => {
                 self.on_completion_rule_reference(line, position).ok()?
             }
@@ -1834,6 +1841,84 @@ impl LSPHandlers {
         }
 
         None
+    }
+
+    fn on_completion_remote(
+        &self,
+        line: &str,
+        position: Position,
+        remote: &RemoteInclude,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let Some(project) = &remote.project else {
+            return Ok(vec![]);
+        };
+
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '/' || c == '\\',
+        );
+
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace() || c == '"' || c == '\'' || c == '/' || c == '\\'
+            });
+
+        let path = if let Some(reference) = &remote.reference {
+            format!("{project}/{reference}/")
+        } else {
+            format!("{project}/{DEFAULT_BRANCH_SUBFOLDER}/")
+        };
+
+        let (current, previous) =
+            ParserUtils::find_path_at_cursor(line, usize::try_from(position.character).unwrap());
+
+        let cache = &self.cfg.cache_path;
+        let full_path = format!("{cache}{path}{previous}");
+
+        let mut lsp_completions = vec![];
+        for entry in fs::read_dir(full_path)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            let path_str = path.file_name().unwrap().to_string_lossy();
+
+            if path_str.starts_with('.') {
+                debug!("path starts with .; skipping");
+                continue;
+            }
+
+            if !current.trim().is_empty() && !path_str.contains(&current) {
+                debug!("path: {:?} doesnt contain: {:?}", path_str, current);
+                continue;
+            }
+
+            if path.is_file() && !path_str.ends_with(".yaml") && !path_str.ends_with(".yml") {
+                continue;
+            }
+
+            let c = LSPCompletion {
+                label: path_str.to_string(),
+                details: None,
+                location: LSPLocation {
+                    range: Range {
+                        start: LSPPosition {
+                            line: position.line,
+                            character: position.character - u32::try_from(word.len())?,
+                        },
+                        end: LSPPosition {
+                            line: position.line,
+                            character: position.character + u32::try_from(after.len())?,
+                        },
+                    },
+                    ..Default::default()
+                },
+            };
+
+            lsp_completions.push(c);
+        }
+
+        Ok(lsp_completions)
     }
 }
 

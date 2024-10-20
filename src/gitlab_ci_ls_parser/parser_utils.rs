@@ -100,6 +100,46 @@ impl ParserUtils {
         )
     }
 
+    pub fn find_path_at_cursor(line: &str, cursor_pos: usize) -> (String, String) {
+        if cursor_pos >= line.len() {
+            return (String::new(), String::new());
+        }
+
+        let mut current_component = String::new();
+        let mut previous_components = String::new();
+
+        let mut found_current = false;
+
+        for i in (0..cursor_pos).rev() {
+            let c = line.chars().nth(i).unwrap();
+            let p = {
+                if i == 0 {
+                    'X'
+                } else {
+                    line.chars().nth(i - 1).unwrap()
+                }
+            };
+
+            if p.is_whitespace() || c == '"' {
+                break;
+            }
+
+            if c == '/' || c == '\\' {
+                if found_current {
+                    previous_components.insert(0, c); // insert at the beginning since we're moving backwards
+                } else {
+                    found_current = true;
+                }
+            } else if found_current {
+                previous_components.insert(0, c); // insert at the beginning since we're moving backwards
+            } else {
+                current_component.insert(0, c); // insert at the beginning since we're moving backwards
+            }
+        }
+
+        (current_component, previous_components)
+    }
+
     // Its used because component can be in four different places
     // TODO: test this
     pub fn get_component(repo_dest: &str, component_name: &str) -> anyhow::Result<GitlabElement> {
@@ -190,5 +230,23 @@ mod tests {
         };
 
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn test_find_path_at_cursor() {
+        let line = "/test/please/here";
+        let cursor = 14;
+        let (path, parent) = ParserUtils::find_path_at_cursor(line, cursor);
+        assert_eq!(path, "h");
+        assert_eq!(parent, "/test/please");
+    }
+
+    #[test]
+    fn test_find_path_at_cursor_quotes() {
+        let line = r#""/test/please/here""#;
+        let cursor = 15;
+        let (path, parent) = ParserUtils::find_path_at_cursor(line, cursor);
+        assert_eq!(path, "h");
+        assert_eq!(parent, "/test/please");
     }
 }
