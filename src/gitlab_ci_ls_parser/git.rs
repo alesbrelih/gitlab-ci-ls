@@ -287,6 +287,8 @@ impl Git for GitImpl {
         let files = files
             .iter()
             .filter_map(|file| {
+                // TODO: dirty hack, fix it when time
+                let file = prepend_if_needed(file, '/');
                 let file_path = format!("{repo_dest}{file}");
                 debug!("filepath: {}", file_path);
 
@@ -401,6 +403,14 @@ impl Git for GitImpl {
 
         GitImpl::clone_component_repo(repo_dest.as_str(), &component_info);
         ParserUtils::get_component(&repo_dest, &component_info.component)
+    }
+}
+
+fn prepend_if_needed(input: &str, character: char) -> String {
+    if input.starts_with(character) {
+        input.to_string()
+    } else {
+        format!("{character}{input}")
     }
 }
 
