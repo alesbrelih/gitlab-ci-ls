@@ -19,7 +19,7 @@ simple_logger = "5.0.0"
 tokio = "1.40.0"
 anyhow = "1.0.90"
 serde = "1.0.210"
-tree-sitter = "0.24.2"
+tree-sitter = "0.24.3"
 tree-sitter-yaml = "0.6.1"
 reqwest = { version = "0.12.8", features = ["blocking"] }
 regex = "1.11.0"
