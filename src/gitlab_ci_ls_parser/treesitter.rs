@@ -590,11 +590,16 @@ impl Treesitter for TreesitterImpl {
                 for c in mat.captures {
                     match c.index {
                         idx if idx == project_name_index => {
-                            remote_include.project = Some(content[c.node.byte_range()].to_string());
+                            remote_include.project = Some(
+                                ParserUtils::strip_quotes(&content[c.node.byte_range()])
+                                    .to_string(),
+                            );
                         }
                         idx if idx == project_ref_index => {
-                            remote_include.reference =
-                                Some(content[c.node.byte_range()].to_string());
+                            remote_include.reference = Some(
+                                ParserUtils::strip_quotes(&content[c.node.byte_range()])
+                                    .to_string(),
+                            );
                         }
                         idx if idx == project_file_index => {
                             if c.node.start_position().row == position.line as usize {

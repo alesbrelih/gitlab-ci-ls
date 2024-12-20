@@ -466,14 +466,14 @@ impl TreesitterQueries {
                                                             block_mapping(
                                                                 block_mapping_pair
                                                                     key: (flow_node(plain_scalar(string_scalar)@project_key))
-                                                                    value: (flow_node(plain_scalar)@project_value)
+                                                                    value: (flow_node)@project_value
                                                             )
                                                         )
                                                         (
                                                             block_mapping(
                                                                 block_mapping_pair
                                                                     key: (flow_node(plain_scalar(string_scalar)@ref_key))
-                                                                    value: (flow_node(plain_scalar)@ref_value)
+                                                                    value: (flow_node)@ref_value
                                                             )
                                                         )
                                                         (
