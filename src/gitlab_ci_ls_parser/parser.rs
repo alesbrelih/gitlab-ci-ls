@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use log::{error, info};
+use log::{error, info, warn};
 use lsp_types::{Position, Url};
 
 use super::{
@@ -133,8 +133,14 @@ impl ParserImpl {
 
                 serde_yaml::Value::Mapping(merged_map)
             }
-            // When values are not mappings, other takes precedence.
-            (_, _) => other.clone(),
+            // When values are not mappings, base takes precedence.
+            (_, _) => {
+                if let serde_yaml::Value::Null = base {
+                    other.clone()
+                } else {
+                    base.clone()
+                }
+            }
         }
     }
 
