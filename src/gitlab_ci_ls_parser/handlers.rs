@@ -85,6 +85,7 @@ impl LSPHandlers {
             .contains(&self.cfg.cache_path.to_lowercase())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn on_hover(&self, request: Request) -> Option<LSPResult> {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
 
@@ -101,7 +102,7 @@ impl LSPHandlers {
             .trim_end_matches(':');
 
         match self.parser.get_position_type(document, position) {
-            parser::PositionType::Extend | parser::PositionType::RootNode => {
+            parser::PositionType::Extend => {
                 for (document_uri, node) in nodes.iter() {
                     for (key, content) in node {
                         if key.eq(word) {
@@ -123,6 +124,34 @@ impl LSPHandlers {
                                 content: format!("```yaml\n{cnt}\n```"),
                             }));
                         }
+                    }
+                }
+
+                None
+            }
+            parser::PositionType::RootNode => {
+                let document_uri = format!("file://{}", uri.path());
+                let node = nodes.get(&document_uri)?;
+
+                for (key, content) in node {
+                    if key.eq(word) {
+                        let cnt = match self.parser.get_full_definition(
+                            GitlabElement {
+                                key: key.clone(),
+                                content: Some(content.to_string()),
+                                uri: document_uri.clone(),
+                                ..Default::default()
+                            },
+                            &store,
+                        ) {
+                            Ok(c) => c,
+                            Err(err) => return Some(LSPResult::Error(err)),
+                        };
+
+                        return Some(LSPResult::Hover(HoverResult {
+                            id: request.id,
+                            content: format!("```yaml\n{cnt}\n```"),
+                        }));
                     }
                 }
 
