@@ -178,14 +178,14 @@ impl Treesitter for TreesitterImpl {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = match Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_root_node(node_key),
         ) {
             Ok(q) => q,
@@ -233,14 +233,14 @@ impl Treesitter for TreesitterImpl {
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_root_nodes(),
         )
         .unwrap();
@@ -276,7 +276,7 @@ impl Treesitter for TreesitterImpl {
     fn get_root_variables(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         // TODO: this should be generic fn accepting treesitter query
@@ -285,7 +285,7 @@ impl Treesitter for TreesitterImpl {
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_root_variables(),
         )
         .unwrap();
@@ -333,14 +333,14 @@ impl Treesitter for TreesitterImpl {
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_stage_definitions(),
         )
         .unwrap();
@@ -388,14 +388,14 @@ impl Treesitter for TreesitterImpl {
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_stages(stage),
         )
         .unwrap();
@@ -450,14 +450,14 @@ impl Treesitter for TreesitterImpl {
     ) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_extends(extend_name),
         )
         .unwrap();
@@ -497,14 +497,14 @@ impl Treesitter for TreesitterImpl {
     fn get_position_type(&self, content: &str, position: Position) -> parser::PositionType {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_position_type(),
         )
         .unwrap();
@@ -590,11 +590,16 @@ impl Treesitter for TreesitterImpl {
                 for c in mat.captures {
                     match c.index {
                         idx if idx == project_name_index => {
-                            remote_include.project = Some(content[c.node.byte_range()].to_string());
+                            remote_include.project = Some(
+                                ParserUtils::strip_quotes(&content[c.node.byte_range()])
+                                    .to_string(),
+                            );
                         }
                         idx if idx == project_ref_index => {
-                            remote_include.reference =
-                                Some(content[c.node.byte_range()].to_string());
+                            remote_include.reference = Some(
+                                ParserUtils::strip_quotes(&content[c.node.byte_range()])
+                                    .to_string(),
+                            );
                         }
                         idx if idx == project_file_index => {
                             if c.node.start_position().row == position.line as usize {
@@ -687,14 +692,14 @@ impl Treesitter for TreesitterImpl {
     ) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_job_needs(needs_name),
         )
         .unwrap();
@@ -737,14 +742,14 @@ impl Treesitter for TreesitterImpl {
     ) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_root_node_at_position(),
         )
         .unwrap();
@@ -786,14 +791,14 @@ impl Treesitter for TreesitterImpl {
     ) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_job_variable_definition(job_name, variable_name),
         )
         .unwrap();
@@ -834,14 +839,14 @@ impl Treesitter for TreesitterImpl {
     fn get_component_spec_inputs(&self, content: &str) -> Option<String> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_component_spec_inputs(),
         )
         .unwrap();
@@ -865,14 +870,14 @@ impl Treesitter for TreesitterImpl {
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_components(),
         )
         .unwrap();
@@ -1012,14 +1017,14 @@ impl Treesitter for TreesitterImpl {
     ) -> Vec<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_rule_references(rule),
         )
         .unwrap();
@@ -1059,14 +1064,14 @@ impl Treesitter for TreesitterImpl {
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = match Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_root_node_key(node_key),
         ) {
             Ok(q) => q,
@@ -1114,14 +1119,14 @@ impl Treesitter for TreesitterImpl {
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_yaml::language())
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
             .expect("Error loading YAML grammar");
 
         let tree = parser.parse(content, None).unwrap();
         let root_node = tree.root_node();
 
         let query = Query::new(
-            &tree_sitter_yaml::language(),
+            &tree_sitter_yaml::LANGUAGE.into(),
             &TreesitterQueries::get_all_caches(),
         )
         .unwrap();
