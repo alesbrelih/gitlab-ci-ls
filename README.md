@@ -11,9 +11,10 @@ It is intended to be used alongside `yaml-language-server` (yamlls), providing s
 
 ## Features
 
-- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables`, `needs`, `extends` and `variables`.
+- **Go To Definition**: Navigate to definitions of `jobs`, `includes`, `variables`,
+  `needs`, `extends`, `components`, `stages` and `variables`.
 - **Find References**: Find all usages of `jobs`, `extends` and `stages`.
-- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, `variables` and `components`.
+- **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, `variables`, `included projects files` and `components`.
 - **Hover Information**: View documentation for job with merged definitions.
 - **Diagnostics**: Identifies issues with `extends` references, `stage` definitions, `job needs` usage and `components`.
 - **Rename**: Supports job renaming.
