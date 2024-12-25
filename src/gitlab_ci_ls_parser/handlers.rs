@@ -17,9 +17,9 @@ use crate::gitlab_ci_ls_parser::{
 
 use super::{
     fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, ComponentInput,
-    DefinitionResult, GitlabElement, GitlabInputElement, HoverResult, IncludeInformation,
-    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
-    RemoteInclude, RuleReference,
+    DefinitionResult, GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult,
+    IncludeInformation, LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range,
+    ReferencesResult, RemoteInclude, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -27,6 +27,13 @@ pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
     nodes: Mutex<HashMap<String, HashMap<String, String>>>,
+    // ordered list by imports -> meaning it starts at root element and parses from top down as
+    // parser would do
+    // Also added a new wrapper so all jobs are separated by file in which they are located
+    // This was done so we can still keep the order but elements are inside file objects so
+    // when on_change occurs we can just wipe jobs inside that file structure.
+    // else we wouldn't know if elements were deleted or changed and there would be more code
+    nodes_ordered_list: Mutex<Vec<GitlabFileElements>>,
     stages: Mutex<HashMap<String, GitlabElement>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
     components: Mutex<HashMap<String, Component>>,
@@ -47,6 +54,7 @@ impl LSPHandlers {
             cfg: cfg.clone(),
             store,
             nodes,
+            nodes_ordered_list: vec![].into(),
             stages,
             variables,
             components,
@@ -63,6 +71,10 @@ impl LSPHandlers {
         if let Err(err) = events.index_workspace(events.cfg.root_dir.as_str()) {
             error!("error indexing workspace; err: {}", err);
         }
+
+        //if let Err(err) = events.build_all_nodes(cfg.clone()) {
+        //    error!("error building all nodes; err: {}", err)
+        //}
 
         events
     }
@@ -90,6 +102,7 @@ impl LSPHandlers {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
 
         let store = self.store.lock().unwrap();
+        let node_list = self.nodes_ordered_list.lock().unwrap();
         let nodes = self.nodes.lock().unwrap();
 
         let uri = &params.text_document_position_params.text_document.uri;
@@ -113,7 +126,7 @@ impl LSPHandlers {
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
-                                &store,
+                                &node_list,
                             ) {
                                 Ok(c) => c,
                                 Err(err) => return Some(LSPResult::Error(err)),
@@ -142,7 +155,7 @@ impl LSPHandlers {
                                 uri: document_uri.clone(),
                                 ..Default::default()
                             },
-                            &store,
+                            &node_list,
                         ) {
                             Ok(c) => c,
                             Err(err) => return Some(LSPResult::Error(err)),
@@ -168,7 +181,7 @@ impl LSPHandlers {
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
-                                &store,
+                                &node_list,
                             ) {
                                 Ok(c) => c,
                                 Err(err) => return Some(LSPResult::Error(err)),
@@ -201,7 +214,7 @@ impl LSPHandlers {
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
-                                &store,
+                                &node_list,
                             ) {
                                 Ok(c) => c,
                                 Err(err) => return Some(LSPResult::Error(err)),
@@ -234,6 +247,7 @@ impl LSPHandlers {
 
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
+        let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
         // reset previous
         all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
@@ -250,12 +264,25 @@ impl LSPHandlers {
                 store.insert(file.path, file.content);
             }
 
-            for node in results.nodes {
+            for node in results.nodes.clone() {
                 info!("found node: {:?}", &node);
                 all_nodes
                     .entry(node.uri)
                     .or_default()
                     .insert(node.key, node.content?);
+            }
+
+            if let Some(e) = all_nodes_ordered_list
+                .iter_mut()
+                .find(|e| e.uri == params.text_document.uri.to_string())
+            {
+                e.elements.clone_from(&results.nodes);
+            } else {
+                // new file?
+                all_nodes_ordered_list.push(GitlabFileElements {
+                    uri: params.text_document.uri.to_string(),
+                    elements: results.nodes.clone(),
+                });
             }
 
             if !results.stages.is_empty() {
@@ -337,6 +364,7 @@ impl LSPHandlers {
 
         let store = self.store.lock().unwrap();
         let store = &*store;
+        let node_list = self.nodes_ordered_list.lock().unwrap();
         let document_uri = params.text_document_position_params.text_document.uri;
         let document = store.get::<String>(&document_uri.to_string())?;
         let position = params.text_document_position_params.position;
@@ -434,6 +462,7 @@ impl LSPHandlers {
                     document_uri.as_str(),
                     position,
                     store,
+                    &node_list,
                 )?;
 
                 for location in variable_locations {
@@ -940,6 +969,7 @@ impl LSPHandlers {
         Ok(items)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let mut in_progress = self.indexing_in_progress.lock().unwrap();
         *in_progress = true;
@@ -948,6 +978,7 @@ impl LSPHandlers {
 
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
+        let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
         let mut all_variables = self.variables.lock().unwrap();
         let mut all_components = self.components.lock().unwrap();
@@ -1023,6 +1054,17 @@ impl LSPHandlers {
             for file in results.files {
                 info!("found file: {:?}", &file);
                 store.insert(file.path, file.content);
+            }
+
+            for n in &results.nodes {
+                if let Some(el) = all_nodes_ordered_list.iter_mut().find(|e| e.uri == n.uri) {
+                    el.elements.push(n.clone());
+                } else {
+                    all_nodes_ordered_list.push(GitlabFileElements {
+                        uri: n.uri.clone(),
+                        elements: vec![n.clone()],
+                    });
+                }
             }
 
             for node in results.nodes {

@@ -1,13 +1,17 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
 use anyhow::anyhow;
-use log::{error, info, warn};
+use log::{error, info};
 use lsp_types::{Position, Url};
 
 use super::{
     fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
-    GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabFile, IncludeInformation,
-    IncludeItem, IncludeNode, NodeDefinition, ParseResults, RuleReference,
+    GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
+    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, NodeDefinition,
+    ParseResults, RuleReference,
 };
 
 pub trait Parser {
@@ -50,11 +54,12 @@ pub trait Parser {
         uri: &str,
         position: Position,
         store: &HashMap<String, String>,
+        node_list: &[GitlabFileElements],
     ) -> Option<Vec<GitlabElement>>;
     fn get_full_definition(
         &self,
         element: GitlabElement,
-        store: &HashMap<String, String>,
+        node_list: &[GitlabFileElements],
     ) -> anyhow::Result<String>;
 }
 
@@ -96,88 +101,128 @@ impl ParserImpl {
         }
     }
 
-    fn merge_yaml_nodes(base: &serde_yaml::Value, other: &serde_yaml::Value) -> serde_yaml::Value {
+    fn merge_yaml_nodes(
+        base: &serde_yaml::Value,
+        base_parents: &str,
+        other: &serde_yaml::Value,
+        other_parents: &str,
+    ) -> serde_yaml::Value {
         match (base, other) {
-            // When both values are mappings, merge them.
+            // Merge mappings
             (serde_yaml::Value::Mapping(base_map), serde_yaml::Value::Mapping(other_map)) => {
                 let mut merged_map = serde_yaml::Mapping::new();
 
-                // Insert all values from the base map first.
-                for (k, v) in base_map {
-                    merged_map.insert(k.clone(), v.clone());
-                }
-
-                // Then merge or replace with values from the other map.
-                for (k, v) in other_map {
-                    if k == "extends" {
-                        // 'extends' field in other node takes precedence.
-                        merged_map.insert(k.clone(), v.clone());
-                    } else if let Some(serde_yaml::Value::Sequence(_)) = base_map.get(k) {
-                        // If the key is an array and exists in base, it takes precedence, do nothing.
+                let (primary, secondary, primary_parents, secondary_parents) =
+                    if other_parents.contains(base_parents) {
+                        (base_map, other_map, base_parents, other_parents)
                     } else {
-                        // For all other cases, insert or replace the value from the other map.
-                        merged_map.insert(
-                            k.clone(),
-                            ParserImpl::merge_yaml_nodes(
-                                base_map.get(k).unwrap_or(&serde_yaml::Value::Null),
-                                v,
-                            ),
-                        );
+                        (other_map, base_map, other_parents, base_parents)
+                    };
+
+                // Insert values from primary map
+                for (k, v) in primary {
+                    if k != "extends" {
+                        merged_map.insert(k.clone(), v.clone());
                     }
                 }
 
-                // Handle the edge case for 'extends' if it does not exist in the second node.
-                if base_map.contains_key("extends") && !other_map.contains_key("extends") {
-                    merged_map.remove(serde_yaml::Value::String("extends".to_string()));
+                // Merge or replace values from secondary map
+                for (k, v) in secondary {
+                    if k == "extends" {
+                        continue;
+                    }
+                    if let Some(serde_yaml::Value::Sequence(_)) = primary.get(k) {
+                        // Skip if key is an array in primary
+                        continue;
+                    }
+                    merged_map.insert(
+                        k.clone(),
+                        Self::merge_yaml_nodes(
+                            primary.get(k).unwrap_or(&serde_yaml::Value::Null),
+                            primary_parents,
+                            v,
+                            secondary_parents,
+                        ),
+                    );
                 }
 
                 serde_yaml::Value::Mapping(merged_map)
             }
-            // When values are not mappings, base takes precedence.
-            (_, _) => {
-                if let serde_yaml::Value::Null = base {
-                    other.clone()
-                } else {
-                    base.clone()
+            // Base takes precedence unless null
+            (_, _) => match (base.is_null(), other.is_null()) {
+                (true, false) => other.clone(),
+                (false, true) => base.clone(),
+                _ => {
+                    if other_parents.contains(base_parents) {
+                        base.clone()
+                    } else {
+                        other.clone()
+                    }
                 }
-            }
+            },
         }
+    }
+
+    fn calculate_hash<T: Hash>(t: &T) -> u64 {
+        let mut s = DefaultHasher::new();
+        t.hash(&mut s);
+        s.finish()
     }
 
     fn all_nodes(
         &self,
-        store: &HashMap<String, String>,
-        all_nodes: &mut Vec<GitlabElement>,
-        node: GitlabElement,
-        iter: usize,
+        node_list: &[GitlabFileElements],
+        all_nodes: &mut Vec<GitlabElementWithParentAndLvl>,
+        node: GitlabElementWithParentAndLvl,
     ) {
         // Another safety wow
-        if iter > 5 {
+        if node.lvl > 5 {
             return;
         }
 
         all_nodes.push(node.clone());
 
-        let extends =
-            self.get_all_extends(node.uri, node.content.unwrap_or_default().as_str(), None);
+        // check if we find another job that was named the same way
+        // to prevent recursion we can check object hash to not match original job hash
+        // that means it's a different job
+        for file in node_list {
+            for n in &file.elements {
+                if n.key == node.el.key
+                    && !all_nodes
+                        .iter()
+                        .any(|e| Self::calculate_hash(&e.el) == Self::calculate_hash(&n))
+                {
+                    let el = GitlabElementWithParentAndLvl {
+                        el: n.clone(),
+                        lvl: node.lvl,
+                        parents: node.parents.clone(),
+                    };
+                    self.all_nodes(node_list, all_nodes, el);
+                }
+            }
+        }
+
+        let extends = self.get_all_extends(
+            node.el.uri,
+            node.el.content.unwrap_or_default().as_str(),
+            None,
+        );
 
         if extends.is_empty() {
             return;
         }
 
         for extend in extends {
-            for (uri, content) in store {
-                if let Some(root_node) = self.get_root_node(uri, content, extend.key.as_str()) {
-                    let node = GitlabElement {
-                        uri: root_node.uri,
-                        key: root_node.key,
-                        content: Some(root_node.content.unwrap()),
-                        ..Default::default()
-                    };
-
-                    self.all_nodes(store, all_nodes, node, iter + 1);
-
-                    break;
+            for file in node_list {
+                for n in &file.elements {
+                    if n.key == extend.key {
+                        let el = GitlabElementWithParentAndLvl {
+                            el: n.clone(),
+                            lvl: node.lvl + 1,
+                            parents: format!("{}-{}", node.parents.clone(), extend.key),
+                        };
+                        self.all_nodes(node_list, all_nodes, el);
+                    }
                 }
             }
         }
@@ -257,18 +302,6 @@ impl ParserImpl {
             );
         };
         Some(())
-    }
-
-    // Currently just gets the first default definition. IF there are multiple
-    // they get ignored
-    fn get_default_node(&self, store: &HashMap<String, String>) -> Option<GitlabElement> {
-        for (uri, content) in store {
-            if let Some(node) = self.treesitter.get_root_node(uri, content, "default") {
-                return Some(node);
-            }
-        }
-
-        None
     }
 
     fn parse_component(
@@ -517,6 +550,7 @@ impl Parser for ParserImpl {
         uri: &str,
         position: Position,
         store: &HashMap<String, String>,
+        node_list: &[GitlabFileElements],
     ) -> Option<Vec<GitlabElement>> {
         let mut all_nodes = vec![];
 
@@ -525,16 +559,26 @@ impl Parser for ParserImpl {
                 .treesitter
                 .get_root_node_at_position(content, position)?;
 
-            self.all_nodes(store, &mut all_nodes, element, 0);
+            let el = GitlabElementWithParentAndLvl {
+                el: element,
+                lvl: 0,
+                parents: "root".to_string(),
+            };
+
+            self.all_nodes(node_list, &mut all_nodes, el);
         }
 
         Some(
             all_nodes
                 .iter()
                 .filter_map(|e| {
-                    let cnt = store.get(&e.uri)?;
-                    self.treesitter
-                        .job_variable_definition(e.uri.as_str(), cnt, variable, &e.key)
+                    let cnt = store.get(&e.el.uri)?;
+                    self.treesitter.job_variable_definition(
+                        e.el.uri.as_str(),
+                        cnt,
+                        variable,
+                        &e.el.key,
+                    )
                 })
                 .collect(),
         )
@@ -542,40 +586,82 @@ impl Parser for ParserImpl {
 
     fn get_full_definition(
         &self,
-        element: GitlabElement,
-        store: &HashMap<String, String>,
+        top_node: GitlabElement,
+        node_list: &[GitlabFileElements],
     ) -> anyhow::Result<String> {
-        let mut all_nodes = vec![];
-
-        self.all_nodes(store, &mut all_nodes, element.clone(), 0);
-        if let Some(default) = self.get_default_node(store) {
-            all_nodes.push(default);
+        struct MergeNode {
+            yaml: serde_yaml::Value,
+            parents: String,
         }
 
-        let init = serde_yaml::from_str("")
-            .map_err(|e| anyhow!("error initializing empty yaml node; got err: {e}"))?;
+        let mut all_nodes: Vec<GitlabElementWithParentAndLvl> = Vec::new();
 
-        let merged = all_nodes
+        let root_node = GitlabElementWithParentAndLvl {
+            el: top_node.clone(),
+            lvl: 0,
+            parents: "root".to_string(),
+        };
+
+        self.all_nodes(node_list, &mut all_nodes, root_node);
+
+        if let Some(default) = node_list
             .iter()
-            .filter_map(|n| n.content.clone())
-            .map(|c| c.lines().skip(1).collect::<Vec<&str>>().join("\n"))
-            .fold(init, |acc, x| {
-                let current = serde_yaml::from_str(x.as_str());
-
-                if let Ok(curr) = current {
-                    ParserImpl::merge_yaml_nodes(&acc, &curr)
-                } else {
-                    acc
-                }
+            .flat_map(|e| &e.elements)
+            .find(|e| e.key == "default")
+        {
+            all_nodes.push(GitlabElementWithParentAndLvl {
+                el: default.clone(),
+                lvl: 999, // Defaults have the lowest priority
+                parents: "root".to_string(),
             });
+        }
+
+        let init_node = MergeNode {
+            yaml: serde_yaml::from_str("")
+                .map_err(|e| anyhow!("Error initializing empty YAML node: {e}"))?,
+            parents: "root".to_string(),
+        };
+
+        let mut merged = all_nodes.iter().fold(init_node, |acc, x| {
+            let content = x.el.content.as_deref().unwrap_or("");
+            let current_content = content.lines().skip(1).collect::<Vec<_>>().join("\n");
+
+            match serde_yaml::from_str(&current_content) {
+                Ok(current_yaml) => MergeNode {
+                    yaml: ParserImpl::merge_yaml_nodes(
+                        &acc.yaml,
+                        &acc.parents,
+                        &current_yaml,
+                        &x.parents,
+                    ),
+                    parents: x.parents.clone(),
+                },
+                Err(_) => acc,
+            }
+        });
+
+        if let Some(content) = top_node.content {
+            let current_content = content.lines().skip(1).collect::<Vec<_>>().join("\n");
+            if let Ok(current_yaml) = serde_yaml::from_str(&current_content) {
+                merged = MergeNode {
+                    yaml: ParserImpl::merge_yaml_nodes(
+                        &merged.yaml,
+                        &merged.parents,
+                        &current_yaml,
+                        "overwrite", // setting different parent so its get precedence over
+                                     // previous content
+                    ),
+                    parents: "overwrite".to_string(),
+                };
+            }
+        }
 
         let mut top_level_map = serde_yaml::Mapping::new();
-        top_level_map.insert(serde_yaml::Value::String(element.key), merged);
+        top_level_map.insert(serde_yaml::Value::String(top_node.key), merged.yaml);
 
-        let merged_with_key = serde_yaml::Value::Mapping(top_level_map);
+        let final_yaml = serde_yaml::Value::Mapping(top_level_map);
 
-        serde_yaml::to_string(&merged_with_key)
-            .map_err(|e| anyhow!("error serializing node; got err: {e}"))
+        serde_yaml::to_string(&final_yaml).map_err(|e| anyhow!("Error serializing node: {e}"))
     }
 
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement> {

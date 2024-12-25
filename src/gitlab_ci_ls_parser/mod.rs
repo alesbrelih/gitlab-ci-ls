@@ -13,13 +13,13 @@ pub mod parser_utils;
 pub mod treesitter;
 pub mod treesitter_queries;
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct LSPPosition {
     pub line: u32,
     pub character: u32,
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct Range {
     pub start: LSPPosition,
     pub end: LSPPosition,
@@ -100,12 +100,25 @@ pub struct GitlabFile {
     pub content: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Hash)]
 pub struct GitlabElement {
     pub key: String,
     pub content: Option<String>,
     pub uri: String,
     pub range: Range,
+}
+
+#[derive(Debug, Default, Clone, Hash)]
+pub struct GitlabFileElements {
+    pub uri: String,
+    pub elements: Vec<GitlabElement>,
+}
+
+#[derive(Debug, Default, Clone, Hash)]
+pub struct GitlabElementWithParentAndLvl {
+    pub el: GitlabElement,
+    pub parents: String,
+    pub lvl: usize,
 }
 
 #[derive(Debug, Default, Clone)]
