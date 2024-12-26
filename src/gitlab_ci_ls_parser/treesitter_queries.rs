@@ -17,7 +17,7 @@ impl TreesitterQueries {
             key: (flow_node) @key
             value: [
                 (flow_node(plain_scalar(string_scalar))) @value
-                (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @value)))))
+                (block_node(block_sequence(block_sequence_item(flow_node)@value)))
             ]
             (#eq? @key "extends")
             {search}
@@ -115,11 +115,12 @@ impl TreesitterQueries {
         (
             block_mapping_pair
             key: (flow_node(plain_scalar(string_scalar) @key))
-            value: (block_node(block_sequence(block_sequence_item(flow_node(plain_scalar(string_scalar) @value)))))
+            value: (block_node(block_sequence(block_sequence_item(flow_node)@value)))
 
             (#eq? @key "stages")
         )
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     pub fn get_all_stages(stage: Option<&str>) -> String {
@@ -144,11 +145,7 @@ impl TreesitterQueries {
                                                     plain_scalar(string_scalar) @key
                                                 )
                                             )
-                                            value: (
-                                                flow_node(
-                                                    plain_scalar(string_scalar) @value
-                                                )
-                                            )
+                                            value: (flow_node)@value
 
                                     )
                                 )
@@ -225,10 +222,8 @@ impl TreesitterQueries {
                         )
                     )
                     value: (
-                        flow_node(
-                            plain_scalar(string_scalar) @stage
-                        )
-                    )
+                        flow_node
+                    )@stage
                 (#eq? @keystage "stage")
             )
             (
