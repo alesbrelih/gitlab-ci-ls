@@ -77,6 +77,7 @@ pub enum PositionType {
     Variable,
     None,
     RootNode,
+    Dependency,
     Include(IncludeInformation),
     Needs(NodeDefinition),
     RuleReference(RuleReference),

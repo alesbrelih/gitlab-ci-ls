@@ -16,10 +16,12 @@ use crate::gitlab_ci_ls_parser::{
 };
 
 use super::{
-    fs_utils, parser, parser_utils, treesitter, CompletionResult, Component, ComponentInput,
-    DefinitionResult, GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult,
-    IncludeInformation, LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range,
-    ReferencesResult, RemoteInclude, RuleReference,
+    fs_utils,
+    parser::{self, PositionType},
+    parser_utils, treesitter, CompletionResult, Component, ComponentInput, DefinitionResult,
+    GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult, IncludeInformation,
+    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
+    RemoteInclude, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -35,6 +37,10 @@ pub struct LSPHandlers {
     // else we wouldn't know if elements were deleted or changed and there would be more code
     nodes_ordered_list: Mutex<Vec<GitlabFileElements>>,
     stages: Mutex<HashMap<String, GitlabElement>>,
+    // Need ordered list of stages so I can autocomplete better.
+    // For example depencency keyword can only take jobs in previous or same stage before yaml
+    // becomes invalid
+    stages_ordered_list: Mutex<Vec<String>>,
     variables: Mutex<HashMap<String, GitlabElement>>,
     components: Mutex<HashMap<String, Component>>,
     indexing_in_progress: Mutex<bool>,
@@ -55,6 +61,7 @@ impl LSPHandlers {
             store,
             nodes,
             nodes_ordered_list: vec![].into(),
+            stages_ordered_list: vec![].into(),
             stages,
             variables,
             components,
@@ -115,7 +122,7 @@ impl LSPHandlers {
             .trim_end_matches(':');
 
         match self.parser.get_position_type(document, position) {
-            parser::PositionType::Extend => {
+            parser::PositionType::Extend | PositionType::Dependency => {
                 for (document_uri, node) in nodes.iter() {
                     for (key, content) in node {
                         if key.eq(word) {
@@ -248,6 +255,7 @@ impl LSPHandlers {
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
+        let mut all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
         // reset previous
         all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
@@ -289,10 +297,18 @@ impl LSPHandlers {
                 let mut all_stages = self.stages.lock().unwrap();
                 all_stages.clear();
 
-                for stage in results.stages {
+                for stage in &results.stages {
                     info!("found stage: {:?}", &stage);
-                    all_stages.insert(stage.key.clone(), stage);
+                    all_stages.insert(stage.key.clone(), stage.clone());
                 }
+
+                all_stages_ordered_list.clone_from(
+                    &results
+                        .stages
+                        .into_iter()
+                        .map(|s| s.key)
+                        .collect::<Vec<String>>(),
+                );
             }
 
             // should be per file...
@@ -373,7 +389,9 @@ impl LSPHandlers {
         let mut locations: Vec<LSPLocation> = vec![];
 
         match self.parser.get_position_type(document, position) {
-            parser::PositionType::RootNode | parser::PositionType::Extend => {
+            parser::PositionType::RootNode
+            | parser::PositionType::Extend
+            | parser::PositionType::Dependency => {
                 let line = document.lines().nth(position.line as usize)?;
                 let word =
                     parser_utils::ParserUtils::extract_word(line, position.character as usize)?
@@ -679,6 +697,9 @@ impl LSPHandlers {
 
         let items = match self.parser.get_position_type(document, position) {
             parser::PositionType::Stage => self.on_completion_stages(line, position).ok()?,
+            parser::PositionType::Dependency => {
+                self.on_completion_dependencies(line, position).ok()?
+            }
             parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
             parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
             parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
@@ -768,6 +789,57 @@ impl LSPHandlers {
 
         Ok(items)
     }
+
+    fn on_completion_dependencies(
+        &self,
+        line: &str,
+        position: Position,
+    ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let nodes = self
+            .nodes
+            .lock()
+            .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
+
+        let word = parser_utils::ParserUtils::word_before_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace() || c == '"' || c == '\'',
+        );
+        let after =
+            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
+                c.is_whitespace() || c == '"' || c == '\''
+            });
+
+        let items = nodes
+            .values()
+            .flat_map(|needs| needs.iter())
+            .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
+            .flat_map(
+                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
+                    Ok(LSPCompletion {
+                        label: node_key.clone(),
+                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
+                        location: LSPLocation {
+                            range: Range {
+                                start: LSPPosition {
+                                    line: position.line,
+                                    character: position.character - u32::try_from(word.len())?,
+                                },
+                                end: LSPPosition {
+                                    line: position.line,
+                                    character: position.character + u32::try_from(after.len())?,
+                                },
+                            },
+                            ..Default::default()
+                        },
+                    })
+                },
+            )
+            .collect();
+
+        Ok(items)
+    }
+
     fn on_completion_extends(
         &self,
         line: &str,
@@ -979,6 +1051,7 @@ impl LSPHandlers {
         let mut store = self.store.lock().unwrap();
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
+        let mut all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
         let mut all_variables = self.variables.lock().unwrap();
         let mut all_components = self.components.lock().unwrap();
@@ -1006,10 +1079,18 @@ impl LSPHandlers {
                         .insert(node.key, content);
                 }
 
-                for stage in results.stages {
+                for stage in &results.stages {
                     info!("found stage: {:?}", &stage);
-                    all_stages.insert(stage.key.clone(), stage);
+                    all_stages.insert(stage.key.clone(), stage.clone());
                 }
+
+                all_stages_ordered_list.clone_from(
+                    &results
+                        .stages
+                        .into_iter()
+                        .map(|s| s.key)
+                        .collect::<Vec<String>>(),
+                );
 
                 for variable in results.variables {
                     info!("found variable: {:?}", &variable);

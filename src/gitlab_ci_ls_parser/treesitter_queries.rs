@@ -238,6 +238,19 @@ impl TreesitterQueries {
             )
         "#;
 
+        let search_dependencies = r#"
+            (
+                block_mapping_pair
+                    key: (
+                        flow_node(
+                            plain_scalar(string_scalar) @keydependency
+                        )
+                    )
+                    value: (block_node(block_sequence(block_sequence_item)@dependency ))
+                (#eq? @keystage "dependencies")
+            )
+        "#;
+
         let search_variables = r#"
             (
                 block_mapping_pair
@@ -627,6 +640,7 @@ impl TreesitterQueries {
             {search_job_needs}
             {search_remote_urls}
             {search_basic_include}
+            {search_dependencies}
         "#
         )
     }

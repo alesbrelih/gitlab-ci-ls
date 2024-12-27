@@ -551,6 +551,7 @@ impl Treesitter for TreesitterImpl {
             .capture_index_for_name("component_input_value_block")
             .unwrap();
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
+        let dependency_index = query.capture_index_for_name("dependency").unwrap();
 
         while let Some(mat) = matches.next() {
             // If this is a remote reference capture, I need to capture multiple values
@@ -636,6 +637,9 @@ impl Treesitter for TreesitterImpl {
                         match c.index {
                             idx if idx == extends_index => return parser::PositionType::Extend,
                             idx if idx == stage_index => return parser::PositionType::Stage,
+                            idx if idx == dependency_index => {
+                                return parser::PositionType::Dependency
+                            }
                             idx if idx == variable_index => return parser::PositionType::Variable,
                             idx if idx == root_node_index => return parser::PositionType::RootNode,
                             idx if idx == local_include_index => {
