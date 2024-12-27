@@ -859,4 +859,145 @@ mod tests {
             assert_eq!(el, &want[idx]);
         }
     }
+
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn test_get_full_definition() {
+        let parser = ParserImpl::new(
+            vec![],
+            HashMap::new(),
+            String::new(),
+            Box::new(TreesitterImpl::new()),
+            Box::new(MockFSUtils::new()),
+        );
+
+        let first_content = r".first:
+  image: alpine
+  extends: .base
+";
+
+        let second_content = r#".second:
+  image: centos
+  extends:
+    - .minimal
+  variables:
+    JUST: "kidding"
+"#;
+
+        let minimal_content = r#".minimal:
+  before_script: "hello there"
+"#;
+
+        let base_content = r#".base:
+  variables:
+    LOREM: "ipsum"
+    IPSUM: "lorem"
+"#;
+
+        let job_content = r#"job:
+  extends:
+    - .first
+    - .second
+  variables:
+    LOREM: "job"
+"#;
+
+        let duplicated_job_content = r"job:
+  image: ubuntu
+  script: hi job
+";
+
+        let other_job_content = r"other_job:
+  image: golang
+  extends:
+    - .other
+";
+
+        let other_base_content = r#".other:
+  variables:
+    BASE: "other"
+"#;
+
+        let first = GitlabElement {
+            key: ".first".to_string(),
+            content: Some(first_content.to_string()),
+            ..Default::default()
+        };
+
+        let second = GitlabElement {
+            key: ".second".to_string(),
+            content: Some(second_content.to_string()),
+            ..Default::default()
+        };
+
+        let base = GitlabElement {
+            key: ".base".to_string(),
+            content: Some(base_content.to_string()),
+            ..Default::default()
+        };
+
+        let minimal = GitlabElement {
+            key: ".minimal".to_string(),
+            content: Some(minimal_content.to_string()),
+            ..Default::default()
+        };
+
+        let job = GitlabElement {
+            key: "job".to_string(),
+            content: Some(job_content.to_string()),
+            ..Default::default()
+        };
+
+        let duplicated = GitlabElement {
+            key: "job".to_string(),
+            content: Some(duplicated_job_content.to_string()),
+            ..Default::default()
+        };
+
+        let other_job = GitlabElement {
+            key: "other_job".to_string(),
+            content: Some(other_job_content.to_string()),
+            ..Default::default()
+        };
+
+        let other = GitlabElement {
+            key: ".other".to_string(),
+            content: Some(other_base_content.to_string()),
+            ..Default::default()
+        };
+
+        let mocked_node_list: Vec<GitlabFileElements> = vec![
+            GitlabFileElements {
+                uri: "first-file.yml".to_string(),
+                elements: vec![
+                    duplicated.clone(),
+                    first.clone(),
+                    base.clone(),
+                    other_job.clone(),
+                    other.clone(),
+                    minimal.clone(),
+                ],
+            },
+            GitlabFileElements {
+                uri: "second-file.yml".to_string(),
+                elements: vec![second.clone()],
+            },
+        ];
+
+        let full_definition = parser.get_full_definition(job.clone(), &mocked_node_list);
+
+        assert!(full_definition.is_ok());
+
+        let want = r"job:
+  variables:
+    LOREM: job
+    IPSUM: lorem
+    JUST: kidding
+  image: ubuntu
+  script: hi job
+  before_script: hello there
+";
+
+        assert_eq!(full_definition.unwrap(), want);
+    }
 }
