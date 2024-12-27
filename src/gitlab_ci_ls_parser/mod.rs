@@ -100,7 +100,7 @@ pub struct GitlabFile {
     pub content: String,
 }
 
-#[derive(Debug, Default, Clone, Hash)]
+#[derive(Debug, Default, Clone, Hash, PartialEq)]
 pub struct GitlabElement {
     pub key: String,
     pub content: Option<String>,
@@ -114,7 +114,7 @@ pub struct GitlabFileElements {
     pub elements: Vec<GitlabElement>,
 }
 
-#[derive(Debug, Default, Clone, Hash)]
+#[derive(Debug, Default, Clone, Hash, PartialEq)]
 pub struct GitlabElementWithParentAndLvl {
     pub el: GitlabElement,
     pub parents: String,

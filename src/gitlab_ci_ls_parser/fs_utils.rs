@@ -1,3 +1,6 @@
+use mockall::{automock, predicate::str};
+
+#[cfg_attr(test, automock)]
 pub trait FSUtils {
     fn create_dir_all(&self, path: &str) -> anyhow::Result<()>;
 }

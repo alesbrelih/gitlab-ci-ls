@@ -169,7 +169,7 @@ impl ParserImpl {
         s.finish()
     }
 
-    fn all_nodes(
+    fn get_all_nodes(
         &self,
         node_list: &[GitlabFileElements],
         all_nodes: &mut Vec<GitlabElementWithParentAndLvl>,
@@ -197,7 +197,7 @@ impl ParserImpl {
                         lvl: node.lvl,
                         parents: node.parents.clone(),
                     };
-                    self.all_nodes(node_list, all_nodes, el);
+                    self.get_all_nodes(node_list, all_nodes, el);
                 }
             }
         }
@@ -221,7 +221,7 @@ impl ParserImpl {
                             lvl: node.lvl + 1,
                             parents: format!("{}-{}", node.parents.clone(), extend.key),
                         };
-                        self.all_nodes(node_list, all_nodes, el);
+                        self.get_all_nodes(node_list, all_nodes, el);
                     }
                 }
             }
@@ -565,7 +565,7 @@ impl Parser for ParserImpl {
                 parents: "root".to_string(),
             };
 
-            self.all_nodes(node_list, &mut all_nodes, el);
+            self.get_all_nodes(node_list, &mut all_nodes, el);
         }
 
         Some(
@@ -602,7 +602,7 @@ impl Parser for ParserImpl {
             parents: "root".to_string(),
         };
 
-        self.all_nodes(node_list, &mut all_nodes, root_node);
+        self.get_all_nodes(node_list, &mut all_nodes, root_node);
 
         if let Some(default) = node_list
             .iter()
@@ -670,5 +670,193 @@ impl Parser for ParserImpl {
 
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
         self.treesitter.get_all_multi_caches(uri, content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fs_utils::MockFSUtils;
+    use treesitter::TreesitterImpl;
+
+    use super::*;
+
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn test_get_all_nodes() {
+        let parser = ParserImpl::new(
+            vec![],
+            HashMap::new(),
+            String::new(),
+            Box::new(TreesitterImpl::new()),
+            Box::new(MockFSUtils::new()),
+        );
+
+        let first_content = r"
+        .first:
+          image: alpine
+          extends: .base
+        ";
+
+        let second_content = r#"
+        .second:
+          image: centos
+          extends:
+            - .minimal
+          variables:
+            JUST: "kidding"
+        "#;
+
+        let minimal_content = r#"
+        .minimal:
+          before_script: "hello there"
+        "#;
+
+        let base_content = r#"
+        .base:
+          variables:
+            LOREM: "ipsum"
+            IPSUM: "lorem"
+        "#;
+
+        let job_content = r#"
+        job:
+          extends:
+            - .first
+            - .second
+          variables:
+            LOREM: "job"
+        "#;
+
+        let duplicated_job_content = r"
+        job:
+          image: ubuntu
+        ";
+
+        let other_job_content = r"
+        other_job:
+          extends:
+            - .other
+          image: golang
+        ";
+
+        let other_base_content = r#"
+        .other:
+          variables:
+            BASE: "other"
+        "#;
+
+        let first = GitlabElement {
+            key: ".first".to_string(),
+            content: Some(first_content.to_string()),
+            ..Default::default()
+        };
+
+        let second = GitlabElement {
+            key: ".second".to_string(),
+            content: Some(second_content.to_string()),
+            ..Default::default()
+        };
+
+        let base = GitlabElement {
+            key: ".base".to_string(),
+            content: Some(base_content.to_string()),
+            ..Default::default()
+        };
+
+        let minimal = GitlabElement {
+            key: ".minimal".to_string(),
+            content: Some(minimal_content.to_string()),
+            ..Default::default()
+        };
+
+        let job = GitlabElement {
+            key: "job".to_string(),
+            content: Some(job_content.to_string()),
+            ..Default::default()
+        };
+
+        let duplicated = GitlabElement {
+            key: "job".to_string(),
+            content: Some(duplicated_job_content.to_string()),
+            ..Default::default()
+        };
+
+        let other_job = GitlabElement {
+            key: "other_job".to_string(),
+            content: Some(other_job_content.to_string()),
+            ..Default::default()
+        };
+
+        let other = GitlabElement {
+            key: ".other".to_string(),
+            content: Some(other_base_content.to_string()),
+            ..Default::default()
+        };
+
+        let mocked_node_list: Vec<GitlabFileElements> = vec![
+            GitlabFileElements {
+                uri: "first-file.yml".to_string(),
+                elements: vec![
+                    duplicated.clone(),
+                    first.clone(),
+                    base.clone(),
+                    other_job.clone(),
+                    other.clone(),
+                    minimal.clone(),
+                ],
+            },
+            GitlabFileElements {
+                uri: "second-file.yml".to_string(),
+                elements: vec![second.clone()],
+            },
+        ];
+
+        let initial_node = GitlabElementWithParentAndLvl {
+            el: job.clone(),
+            lvl: 0,
+            parents: "root".to_string(),
+        };
+
+        let mut all_nodes: Vec<GitlabElementWithParentAndLvl> = vec![];
+        parser.get_all_nodes(&mocked_node_list, &mut all_nodes, initial_node);
+
+        assert_eq!(all_nodes.len(), 6);
+
+        let want: Vec<GitlabElementWithParentAndLvl> = vec![
+            GitlabElementWithParentAndLvl {
+                lvl: 0,
+                parents: "root".to_string(),
+                el: job.clone(),
+            },
+            GitlabElementWithParentAndLvl {
+                lvl: 0,
+                parents: "root".to_string(),
+                el: duplicated.clone(),
+            },
+            GitlabElementWithParentAndLvl {
+                lvl: 1,
+                parents: "root-.first".to_string(),
+                el: first.clone(),
+            },
+            GitlabElementWithParentAndLvl {
+                lvl: 2,
+                parents: "root-.first-.base".to_string(),
+                el: base.clone(),
+            },
+            GitlabElementWithParentAndLvl {
+                lvl: 1,
+                parents: "root-.second".to_string(),
+                el: second.clone(),
+            },
+            GitlabElementWithParentAndLvl {
+                lvl: 2,
+                parents: "root-.second-.minimal".to_string(),
+                el: minimal,
+            },
+        ];
+
+        for (idx, el) in all_nodes.iter().enumerate() {
+            assert_eq!(el, &want[idx]);
+        }
     }
 }

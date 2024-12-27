@@ -9,8 +9,12 @@ use super::{
     GitlabComponentElement, GitlabElement, GitlabInputElement, Include, IncludeInformation,
     LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
 };
+use mockall::{automock, predicate::str};
 
 // TODO: initialize tree only once
+
+#[allow(clippy::ref_option_ref)]
+#[cfg_attr(test, automock)]
 pub trait Treesitter {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
@@ -19,24 +23,29 @@ pub trait Treesitter {
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
-    fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
-    fn get_all_rule_references(
+    fn get_all_stages<'a>(
         &self,
-        uri: &str,
-        content: &str,
-        rule: Option<&str>,
+        uri: &'a str,
+        content: &'a str,
+        stage: Option<&'a str>,
     ) -> Vec<GitlabElement>;
-    fn get_all_extends(
+    fn get_all_rule_references<'a>(
+        &self,
+        uri: &'a str,
+        content: &'a str,
+        rule: Option<&'a str>,
+    ) -> Vec<GitlabElement>;
+    fn get_all_extends<'a>(
         &self,
         uri: String,
-        content: &str,
-        extend_name: Option<&str>,
+        content: &'a str,
+        extend_name: Option<&'a str>,
     ) -> Vec<GitlabElement>;
-    fn get_all_job_needs(
+    fn get_all_job_needs<'a>(
         &self,
         uri: String,
-        content: &str,
-        needs_name: Option<&str>,
+        content: &'a str,
+        needs_name: Option<&'a str>,
     ) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> parser::PositionType;
     fn get_root_node_at_position(&self, content: &str, position: Position)
