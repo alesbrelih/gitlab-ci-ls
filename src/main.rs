@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use clap::Parser;
-use log::{error, info, LevelFilter};
+use gitlab_ci_ls_parser::LSPExperimental;
+use log::{error, info, warn, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,15 @@ struct InitializationOptions {
 
     #[serde(rename = "cache", default = "default_cache_path")]
     cache_path: String,
+
+    #[serde(default = "default_options")]
+    options: Options,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Options {
+    #[serde(default = "default_dependencies_autocomplete_stage_filtering")]
+    dependencies_autocomplete_stage_filtering: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +51,16 @@ struct InitializationParams {
 
     #[serde(rename = "rootPath")]
     root_path: String,
+}
+
+fn default_options() -> Options {
+    Options {
+        dependencies_autocomplete_stage_filtering: false,
+    }
+}
+
+fn default_dependencies_autocomplete_stage_filtering() -> bool {
+    false
 }
 
 fn default_package_map() -> HashMap<String, String> {
@@ -106,6 +126,10 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                         log_path: default_log_path(),
                         package_map: HashMap::new(),
                         cache_path: default_cache_path(),
+                        options: Options {
+                            dependencies_autocomplete_stage_filtering:
+                                default_dependencies_autocomplete_stage_filtering(),
+                        },
                     },
                 }
             }
@@ -143,6 +167,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             package_map: init_params.initialization_options.package_map,
             remote_urls,
             root_dir: init_params.root_path,
+            experimental: LSPExperimental {
+                dependencies_autocomplete_stage_filtering: init_params
+                    .initialization_options
+                    .options
+                    .dependencies_autocomplete_stage_filtering,
+            },
         },
         Box::new(fs_utils),
     );

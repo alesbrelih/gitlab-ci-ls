@@ -161,11 +161,17 @@ pub struct ParseResults {
 }
 
 #[derive(Clone, Debug)]
+pub struct LSPExperimental {
+    pub dependencies_autocomplete_stage_filtering: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct LSPConfig {
     pub root_dir: String,
     pub cache_path: String,
     pub package_map: HashMap<String, String>,
     pub remote_urls: Vec<String>,
+    pub experimental: LSPExperimental,
 }
 
 #[derive(Debug)]

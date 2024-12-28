@@ -814,22 +814,30 @@ impl LSPHandlers {
                 c.is_whitespace() || c == '"' || c == '\''
             });
 
+        // autocomplete filtering by stage; experimental opt infeature due to longer responses ATM
         let all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
         let all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
         let mut previous_stages = HashMap::new();
 
-        if let Some(root_node) = self.parser.get_root_node_at_position(document, position) {
-            if let Ok(full_definition) = self
-                .parser
-                .get_full_definition(root_node.clone(), &all_nodes_ordered_list)
-            {
-                let stage = self.parser.get_all_stages(uri, &full_definition, None);
-                if let Some(stage) = stage.first() {
-                    for s in all_stages_ordered_list.iter() {
-                        previous_stages.insert(s.clone(), true);
+        if self
+            .cfg
+            .experimental
+            .dependencies_autocomplete_stage_filtering
+        {
+            if let Some(root_node) = self.parser.get_root_node_at_position(document, position) {
+                if let Ok(full_definition) = self
+                    .parser
+                    .get_full_definition(root_node.clone(), &all_nodes_ordered_list)
+                {
+                    let stage = self.parser.get_all_stages(uri, &full_definition, None);
+                    if let Some(stage) = stage.first() {
+                        for s in all_stages_ordered_list.iter() {
+                            previous_stages.insert(s.clone(), true);
 
-                        if ParserUtils::strip_quotes(s) == ParserUtils::strip_quotes(&stage.key) {
-                            break;
+                            if ParserUtils::strip_quotes(s) == ParserUtils::strip_quotes(&stage.key)
+                            {
+                                break;
+                            }
                         }
                     }
                 }
@@ -841,29 +849,37 @@ impl LSPHandlers {
             .flat_map(|needs| needs.iter())
             .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
             .filter(|(_, element)| {
-                if previous_stages.keys().len() == 0 {
-                    return true;
-                }
+                if self
+                    .cfg
+                    .experimental
+                    .dependencies_autocomplete_stage_filtering
+                {
+                    if previous_stages.keys().len() == 0 {
+                        return true;
+                    }
 
-                if let Some(content) = &element.content {
-                    // check if stage is defined at top node
-                    let stage = self.parser.get_all_stages(uri, content, None);
-                    if let Some(s) = stage.first() {
-                        return previous_stages.contains_key(&s.key);
-                    } else if let Ok(full_definition) = self
-                        .parser
-                        .get_full_definition((*element).clone(), &all_nodes_ordered_list)
-                    {
-                        // stage isn't defined at top node, so we need to get full job definition
-                        // and find stage
-                        let stage = self.parser.get_all_stages(uri, &full_definition, None);
-                        if let Some(stage) = stage.first() {
-                            return previous_stages.contains_key(&stage.key);
+                    if let Some(content) = &element.content {
+                        // check if stage is defined at top node
+                        let stage = self.parser.get_all_stages(uri, content, None);
+                        if let Some(s) = stage.first() {
+                            return previous_stages.contains_key(&s.key);
+                        } else if let Ok(full_definition) = self
+                            .parser
+                            .get_full_definition((*element).clone(), &all_nodes_ordered_list)
+                        {
+                            // stage isn't defined at top node, so we need to get full job definition
+                            // and find stage
+                            let stage = self.parser.get_all_stages(uri, &full_definition, None);
+                            if let Some(stage) = stage.first() {
+                                return previous_stages.contains_key(&stage.key);
+                            }
                         }
                     }
-                }
 
-                true
+                    true
+                } else {
+                    true
+                }
             })
             .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
                 Ok(LSPCompletion {
