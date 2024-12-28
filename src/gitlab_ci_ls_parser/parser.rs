@@ -14,7 +14,9 @@ use super::{
     ParseResults, RuleReference,
 };
 
-pub trait Parser {
+unsafe impl Sync for ParserImpl {}
+
+pub trait Parser: Sync {
     fn get_all_extends(
         &self,
         uri: String,
@@ -39,6 +41,8 @@ pub trait Parser {
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
+    fn get_root_node_at_position(&self, content: &str, position: Position)
+        -> Option<GitlabElement>;
     fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults>;
     fn parse_contents_recursive(
         &self,
@@ -671,6 +675,14 @@ impl Parser for ParserImpl {
 
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
         self.treesitter.get_all_multi_caches(uri, content)
+    }
+
+    fn get_root_node_at_position(
+        &self,
+        content: &str,
+        position: Position,
+    ) -> Option<GitlabElement> {
+        self.treesitter.get_root_node_at_position(content, position)
     }
 }
 

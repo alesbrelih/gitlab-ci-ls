@@ -28,7 +28,7 @@ use super::{
 pub struct LSPHandlers {
     cfg: LSPConfig,
     store: Mutex<HashMap<String, String>>,
-    nodes: Mutex<HashMap<String, HashMap<String, String>>>,
+    nodes: Mutex<HashMap<String, HashMap<String, GitlabElement>>>,
     // ordered list by imports -> meaning it starts at root element and parses from top down as
     // parser would do
     // Also added a new wrapper so all jobs are separated by file in which they are located
@@ -124,12 +124,12 @@ impl LSPHandlers {
         match self.parser.get_position_type(document, position) {
             parser::PositionType::Extend | PositionType::Dependency => {
                 for (document_uri, node) in nodes.iter() {
-                    for (key, content) in node {
+                    for (key, element) in node {
                         if key.eq(word) {
                             let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
-                                    content: Some(content.to_string()),
+                                    content: element.content.clone(),
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
@@ -153,12 +153,12 @@ impl LSPHandlers {
                 let document_uri = format!("file://{}", uri.path());
                 let node = nodes.get(&document_uri)?;
 
-                for (key, content) in node {
+                for (key, element) in node {
                     if key.eq(word) {
                         let cnt = match self.parser.get_full_definition(
                             GitlabElement {
                                 key: key.clone(),
-                                content: Some(content.to_string()),
+                                content: element.content.clone(),
                                 uri: document_uri.clone(),
                                 ..Default::default()
                             },
@@ -179,12 +179,12 @@ impl LSPHandlers {
             }
             parser::PositionType::RuleReference(RuleReference { node }) => {
                 for (document_uri, n) in nodes.iter() {
-                    for (key, content) in n {
+                    for (key, element) in n {
                         if key.eq(&node) {
                             let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
-                                    content: Some(content.to_string()),
+                                    content: element.content.clone(),
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
@@ -212,12 +212,12 @@ impl LSPHandlers {
                 let node_name = need_split.first()?;
 
                 for (document_uri, n) in nodes.iter() {
-                    for (key, content) in n {
+                    for (key, element) in n {
                         if key.eq(node_name) {
                             let cnt = match self.parser.get_full_definition(
                                 GitlabElement {
                                     key: key.clone(),
-                                    content: Some(content.to_string()),
+                                    content: element.content.clone(),
                                     uri: document_uri.to_string(),
                                     ..Default::default()
                                 },
@@ -273,11 +273,10 @@ impl LSPHandlers {
             }
 
             for node in results.nodes.clone() {
-                info!("found node: {:?}", &node);
                 all_nodes
-                    .entry(node.uri)
+                    .entry(node.uri.clone())
                     .or_default()
-                    .insert(node.key, node.content?);
+                    .insert(node.key.clone(), node);
             }
 
             if let Some(e) = all_nodes_ordered_list
@@ -352,9 +351,9 @@ impl LSPHandlers {
                 info!("found node: {:?}", &node);
 
                 all_nodes
-                    .entry(node.uri)
+                    .entry(node.uri.clone())
                     .or_default()
-                    .insert(node.key, node.content?);
+                    .insert(node.key.clone(), node);
             }
 
             for stage in results.stages {
@@ -697,9 +696,9 @@ impl LSPHandlers {
 
         let items = match self.parser.get_position_type(document, position) {
             parser::PositionType::Stage => self.on_completion_stages(line, position).ok()?,
-            parser::PositionType::Dependency => {
-                self.on_completion_dependencies(line, position).ok()?
-            }
+            parser::PositionType::Dependency => self
+                .on_completion_dependencies(document_uri.as_ref(), document, line, position)
+                .ok()?,
             parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
             parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
             parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
@@ -792,9 +791,13 @@ impl LSPHandlers {
 
     fn on_completion_dependencies(
         &self,
+        uri: &str,
+        document: &str,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
+        let start = Instant::now();
+
         let nodes = self
             .nodes
             .lock()
@@ -805,37 +808,88 @@ impl LSPHandlers {
             position.character as usize,
             |c: char| c.is_whitespace() || c == '"' || c == '\'',
         );
+
         let after =
             parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
                 c.is_whitespace() || c == '"' || c == '\''
             });
 
+        let all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
+        let all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
+        let mut previous_stages = HashMap::new();
+
+        if let Some(root_node) = self.parser.get_root_node_at_position(document, position) {
+            if let Ok(full_definition) = self
+                .parser
+                .get_full_definition(root_node.clone(), &all_nodes_ordered_list)
+            {
+                let stage = self.parser.get_all_stages(uri, &full_definition, None);
+                if let Some(stage) = stage.first() {
+                    for s in all_stages_ordered_list.iter() {
+                        previous_stages.insert(s.clone(), true);
+
+                        if ParserUtils::strip_quotes(s) == ParserUtils::strip_quotes(&stage.key) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         let items = nodes
             .values()
             .flat_map(|needs| needs.iter())
             .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
-            .flat_map(
-                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
-                    Ok(LSPCompletion {
-                        label: node_key.clone(),
-                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
-                        location: LSPLocation {
-                            range: Range {
-                                start: LSPPosition {
-                                    line: position.line,
-                                    character: position.character - u32::try_from(word.len())?,
-                                },
-                                end: LSPPosition {
-                                    line: position.line,
-                                    character: position.character + u32::try_from(after.len())?,
-                                },
+            .filter(|(_, element)| {
+                if previous_stages.keys().len() == 0 {
+                    return true;
+                }
+
+                if let Some(content) = &element.content {
+                    // check if stage is defined at top node
+                    let stage = self.parser.get_all_stages(uri, content, None);
+                    if let Some(s) = stage.first() {
+                        return previous_stages.contains_key(&s.key);
+                    } else if let Ok(full_definition) = self
+                        .parser
+                        .get_full_definition((*element).clone(), &all_nodes_ordered_list)
+                    {
+                        // stage isn't defined at top node, so we need to get full job definition
+                        // and find stage
+                        let stage = self.parser.get_all_stages(uri, &full_definition, None);
+                        if let Some(stage) = stage.first() {
+                            return previous_stages.contains_key(&stage.key);
+                        }
+                    }
+                }
+
+                true
+            })
+            .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: node_key.clone(),
+                    details: Some(format!(
+                        "```yaml\r\n{}\r\n```",
+                        element.clone().content.unwrap_or(String::new())
+                    )),
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
                             },
-                            ..Default::default()
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                    })
-                },
-            )
+                        ..Default::default()
+                    },
+                })
+            })
             .collect();
+
+        info!("completion dependencies: {:?}", start.elapsed());
 
         Ok(items)
     }
@@ -865,29 +919,30 @@ impl LSPHandlers {
             .values()
             .flat_map(|n| n.iter())
             .filter(|(node_key, _)| node_key.starts_with('.') && node_key.contains(word))
-            .flat_map(
-                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
-                    Ok(LSPCompletion {
-                        label: node_key.to_string(),
-                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
-                        location: LSPLocation {
-                            range: Range {
-                                start: LSPPosition {
-                                    line: position.line,
-                                    character: position
-                                        .character
-                                        .saturating_sub(u32::try_from(word.len())?),
-                                },
-                                end: LSPPosition {
-                                    line: position.line,
-                                    character: position.character + u32::try_from(after.len())?,
-                                },
+            .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: node_key.to_string(),
+                    details: Some(format!(
+                        "```yaml\r\n{}\r\n```",
+                        element.clone().content.unwrap_or(String::new())
+                    )),
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position
+                                    .character
+                                    .saturating_sub(u32::try_from(word.len())?),
                             },
-                            ..Default::default()
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                    })
-                },
-            )
+                        ..Default::default()
+                    },
+                })
+            })
             .collect();
 
         Ok(items)
@@ -966,27 +1021,28 @@ impl LSPHandlers {
             .values()
             .flat_map(|needs| needs.iter())
             .filter(|(node_key, _)| node_key.contains(word))
-            .flat_map(
-                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
-                    Ok(LSPCompletion {
-                        label: node_key.clone(),
-                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
-                        location: LSPLocation {
-                            range: Range {
-                                start: LSPPosition {
-                                    line: position.line,
-                                    character: position.character - u32::try_from(word.len())?,
-                                },
-                                end: LSPPosition {
-                                    line: position.line,
-                                    character: position.character + u32::try_from(after.len())?,
-                                },
+            .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: node_key.clone(),
+                    details: Some(format!(
+                        "```yaml\r\n{}\r\n```",
+                        element.clone().content.unwrap_or(String::new())
+                    )),
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
                             },
-                            ..Default::default()
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                    })
-                },
-            )
+                        ..Default::default()
+                    },
+                })
+            })
             .collect();
 
         Ok(items)
@@ -1015,27 +1071,28 @@ impl LSPHandlers {
             .values()
             .flat_map(|needs| needs.iter())
             .filter(|(node_key, _)| !node_key.starts_with('.') && node_key.contains(word))
-            .flat_map(
-                |(node_key, node_description)| -> anyhow::Result<LSPCompletion> {
-                    Ok(LSPCompletion {
-                        label: node_key.clone(),
-                        details: Some(format!("```yaml\r\n{node_description}\r\n```")),
-                        location: LSPLocation {
-                            range: Range {
-                                start: LSPPosition {
-                                    line: position.line,
-                                    character: position.character - u32::try_from(word.len())?,
-                                },
-                                end: LSPPosition {
-                                    line: position.line,
-                                    character: position.character + u32::try_from(after.len())?,
-                                },
+            .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
+                Ok(LSPCompletion {
+                    label: node_key.clone(),
+                    details: Some(format!(
+                        "```yaml\r\n{}\r\n```",
+                        element.clone().content.unwrap_or(String::new())
+                    )),
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
                             },
-                            ..Default::default()
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
                         },
-                    })
-                },
-            )
+                        ..Default::default()
+                    },
+                })
+            })
             .collect();
 
         Ok(items)
@@ -1071,26 +1128,17 @@ impl LSPHandlers {
 
                 for node in results.nodes {
                     info!("found node: {:?}", &node);
-                    let content = node.content.unwrap_or(String::new());
 
                     all_nodes
-                        .entry(node.uri)
+                        .entry(node.uri.clone())
                         .or_default()
-                        .insert(node.key, content);
+                        .insert(node.key.clone(), node);
                 }
 
-                for stage in &results.stages {
+                for stage in results.stages {
                     info!("found stage: {:?}", &stage);
-                    all_stages.insert(stage.key.clone(), stage.clone());
+                    all_stages.insert(stage.key.clone(), stage);
                 }
-
-                all_stages_ordered_list.clone_from(
-                    &results
-                        .stages
-                        .into_iter()
-                        .map(|s| s.key)
-                        .collect::<Vec<String>>(),
-                );
 
                 for variable in results.variables {
                     info!("found variable: {:?}", &variable);
@@ -1150,18 +1198,25 @@ impl LSPHandlers {
 
             for node in results.nodes {
                 info!("found node: {:?}", &node);
-                let content = node.content.unwrap_or(String::new());
 
                 all_nodes
-                    .entry(node.uri)
+                    .entry(node.uri.clone())
                     .or_default()
-                    .insert(node.key, content);
+                    .insert(node.key.clone(), node);
             }
 
-            for stage in results.stages {
+            for stage in &results.stages {
                 info!("found stage: {:?}", &stage);
-                all_stages.insert(stage.key.clone(), stage);
+                all_stages.insert(stage.key.clone(), stage.clone());
             }
+
+            all_stages_ordered_list.clone_from(
+                &results
+                    .stages
+                    .into_iter()
+                    .map(|s| s.key)
+                    .collect::<Vec<String>>(),
+            );
 
             for variable in results.variables {
                 info!("found variable: {:?}", &variable);
