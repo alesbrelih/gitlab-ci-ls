@@ -247,7 +247,7 @@ impl TreesitterQueries {
                         )
                     )
                     value: (block_node(block_sequence(block_sequence_item)@dependency ))
-                (#eq? @keystage "dependencies")
+                (#eq? @keydependency "dependencies")
             )
         "#;
 
