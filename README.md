@@ -34,6 +34,8 @@ Initialization options:
 
 - **cache**: location for cached remote files
 - **log_path**: location for LS log
+- **options**:
+  - **dependencies_autocomplete_stage_filtering**: Items in dependencies options has to be from previous or current stage. This opption enables dependencies autocomplete result filtering by job stages. It is currently set as opt-in because it takes a longer time (cca 800ms on test repo - medium size) when stages aren't defined in root job because language server needs to first build whole job definition (merging extends) before it can check if job is a valid one. Defaults to `false`
 
 ## Installation
 
