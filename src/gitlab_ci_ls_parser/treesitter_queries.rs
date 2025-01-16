@@ -488,7 +488,7 @@ impl TreesitterQueries {
                                                             block_mapping(
                                                             block_mapping_pair
                                                                 key: (flow_node(plain_scalar(string_scalar)@file_key))
-                                                                value: [(block_node(block_sequence(block_sequence_item(flow_node)@file_value)))(flow_node)@file_value]
+                                                                value: [(block_node(block_sequence(block_sequence_item(flow_node)@file_value)))(flow_node(flow_sequence(flow_node)@file_value))(flow_node([(double_quote_scalar)(single_quote_scalar)(plain_scalar)]))@file_value]
                                                             )
                                                         )
                                                     ]
