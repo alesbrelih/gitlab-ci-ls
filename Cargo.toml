@@ -1,6 +1,6 @@
 [package]
 name = "gitlab-ci-ls"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 repository = "https://github.com/alesbrelih/gitlab-ci-ls"
 description = "Language server for Gitlab CI"
