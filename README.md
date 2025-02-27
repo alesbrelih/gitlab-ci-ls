@@ -40,7 +40,7 @@ Initialization options:
 ## Installation
 
 1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com/alesbrelih/gitlab-ci-ls/releases).
-2. **Homebrew (macOS)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
+2. **Homebrew (macOS/Linux)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
 3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
 4. **Mason (neovim)**: [Github](https://github.com/williamboman/mason.nvim)
 
