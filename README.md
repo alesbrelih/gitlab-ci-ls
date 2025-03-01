@@ -43,6 +43,7 @@ Initialization options:
 2. **Homebrew (macOS/Linux)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
 3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
 4. **Mason (neovim)**: [Github](https://github.com/williamboman/mason.nvim)
+5. **Zed integration**: [Zed extension](https://zed.dev/extensions?query=gitlab-ci-ls) You still have to install a binary.
 
 ## Build from source
 
