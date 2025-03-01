@@ -628,7 +628,7 @@ impl TreesitterQueries {
         "#;
 
         format!(
-            r#"
+            r"
             {search_rule_references}
             {search_extends}
             {search_stages}
@@ -641,7 +641,7 @@ impl TreesitterQueries {
             {search_remote_urls}
             {search_basic_include}
             {search_dependencies}
-        "#
+        "
         )
     }
 
