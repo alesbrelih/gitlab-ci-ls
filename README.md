@@ -39,6 +39,8 @@ Initialization options:
 
 ## Installation
 
+**Hint:** On Linux you have to install the package `libssl-dev` (On Debian based distributions) respectively `openssl-devel` (On RedHat based distributions) when you use Cargo or Mason installation.
+
 1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com/alesbrelih/gitlab-ci-ls/releases).
 2. **Homebrew (macOS/Linux)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
 3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
