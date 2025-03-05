@@ -613,7 +613,7 @@ impl TreesitterQueries {
                               (tag)@rule_reference_tag
                               (
                                 flow_sequence(
-                                    (flow_node[(single_quote_scalar)(double_quote_scalar)])@rule_reference_value
+                                    (flow_node)@rule_reference_value
                                     (_)?
                                 )
                                )
