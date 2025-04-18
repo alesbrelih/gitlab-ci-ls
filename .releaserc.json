@@ -1,64 +1,60 @@
 {
-    "branches": [
-        "main"
-    ],
-    "debug": true,
-    "ci": true,
-    "dryRun": false,
-    "tagFormat": "${version}",
-    "plugins": [
-        [
-            "@semantic-release/commit-analyzer",
-            {
-                "releaseRules": [
-                    {
-                        "type": "chore",
-                        "release": "patch"
-                    },
-                    {
-                        "type": "deps",
-                        "release": "patch"
-                    },
-                    {
-                        "type": "docs",
-                        "release": "patch"
-                    }
-                ]
-            }
-        ],
-        "@semantic-release/release-notes-generator",
-        [
-            "@semantic-release/github",
-            {
-                "assets": [
-                    {
-                        "path": "dist/x86_64-apple-darwin/gitlab-ci-ls-x86_64-apple-darwin",
-                        "label": "x86_64-apple-darwin"
-                    },
-                    {
-                        "path": "dist/aarch64-apple-darwin/gitlab-ci-ls-aarch64-apple-darwin",
-                        "label": "aarch64-apple-darwin"
-                    },
-                    {
-                        "path": "dist/x86_64-unknown-linux-gnu/gitlab-ci-ls-x86_64-unknown-linux-gnu",
-                        "label": "x86_64-unknown-linux-gnu"
-                    },
-                    {
-                        "path": "dist/checksums.txt",
-                        "label": "checksums.txt"
-                    }
-                ]
-            }
-        ],
-        "semantic-release-cargo",
-        [
-            "@semantic-release/git",
-            {
-                "assets": [
-                    "Cargo.toml",
-                    "Cargo.lock"
-                ]
-            }
+  "branches": ["main"],
+  "debug": true,
+  "ci": true,
+  "dryRun": false,
+  "tagFormat": "${version}",
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "releaseRules": [
+          {
+            "type": "chore",
+            "release": "patch"
+          },
+          {
+            "type": "deps",
+            "release": "patch"
+          },
+          {
+            "type": "docs",
+            "release": "patch"
+          }
         ]
-    ]
+      }
+    ],
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "dist/x86_64-apple-darwin/gitlab-ci-ls-x86_64-apple-darwin",
+            "label": "x86_64-apple-darwin"
+          },
+          {
+            "path": "dist/aarch64-apple-darwin/gitlab-ci-ls-aarch64-apple-darwin",
+            "label": "aarch64-apple-darwin"
+          },
+          {
+            "path": "dist/x86_64-unknown-linux-gnu/gitlab-ci-ls-x86_64-unknown-linux-gnu",
+            "label": "x86_64-unknown-linux-gnu"
+          },
+          {
+            "path": "dist/checksums.txt",
+            "label": "checksums.txt"
+          }
+        ]
+      }
+    ],
+    "semantic-release-cargo",
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["Cargo.toml", "Cargo.lock"]
+      }
+    ],
+    "semantic-release-export-data"
+  ]
 }
