@@ -160,8 +160,8 @@ impl TreesitterImpl {
                             }
                         }
                     }
-                    _ => continue,
-                };
+                    _ => {}
+                }
             }
 
             if let Some(i) = input {
@@ -617,8 +617,8 @@ impl Treesitter for TreesitterImpl {
                                     Some(content[c.node.byte_range()].to_string());
                             }
                         }
-                        _ => continue,
-                    };
+                        _ => {}
+                    }
                 }
 
                 if remote_include.is_valid() {

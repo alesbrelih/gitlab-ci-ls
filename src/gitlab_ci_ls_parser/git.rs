@@ -127,7 +127,7 @@ impl GitImpl {
                     fs::remove_dir_all(dest).expect("should be able to remove");
                 }
             }
-        };
+        }
     }
 
     fn get_clone_repo_destination(
@@ -256,9 +256,8 @@ impl Git for GitImpl {
                     if dest.exists() {
                         fs::remove_dir_all(dest).expect("should be able to remove");
                     }
-                    continue;
                 }
-            };
+            }
         }
     }
 

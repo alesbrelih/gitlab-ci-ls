@@ -305,7 +305,7 @@ impl ParserImpl {
                 follow,
                 iteration + 1,
             );
-        };
+        }
         Some(())
     }
 

@@ -454,7 +454,7 @@ impl LSPHandlers {
                                 "gotoref: invalid split len. got: {invalid}; needs: {need_split:?}"
                             );
                         }
-                    };
+                    }
                 }
             }
             parser::PositionType::Stage => {
@@ -516,7 +516,7 @@ impl LSPHandlers {
                 error!("invalid position type for goto def");
                 return None;
             }
-        };
+        }
 
         Some(LSPResult::Definition(DefinitionResult {
             id: request.id,
@@ -1357,7 +1357,7 @@ impl LSPHandlers {
                 invalid => {
                     warn!("invalid split len. got: {invalid}; needs: {need_split:?}");
                 }
-            };
+            }
 
             diagnostics.push(Diagnostic::new_simple(
                 lsp_types::Range {
@@ -1931,7 +1931,7 @@ impl LSPHandlers {
             _ => {
                 warn!("invalid type for rename");
             }
-        };
+        }
 
         info!("ON RENAME ELAPSED: {:?}", start.elapsed());
 

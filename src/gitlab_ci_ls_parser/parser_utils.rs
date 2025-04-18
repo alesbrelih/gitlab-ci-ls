@@ -172,7 +172,7 @@ impl ParserUtils {
                 Err(err) => {
                     info!("could not find component; path: {p}, got err: {err}");
                 }
-            };
+            }
         }
         Err(anyhow::anyhow!("could not find component"))
     }
