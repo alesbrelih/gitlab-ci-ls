@@ -161,6 +161,7 @@ jobs:
           extra_plugins: |
             semantic-release-cargo
             @semantic-release/git
+            semantic-release-export-data
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
