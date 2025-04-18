@@ -86,13 +86,13 @@ impl GitImpl {
     fn clone_component_repo(repo_dest: &str, component_info: &ComponentInfo) {
         let repo_dest_path = std::path::Path::new(&repo_dest);
 
-        info!("repo_path: {:?}", repo_dest_path);
+        info!("repo_path: {repo_dest_path:?}");
 
         if repo_dest_path.exists() {
             let mut repo_contents = match repo_dest_path.read_dir() {
                 Ok(contents) => contents,
                 Err(err) => {
-                    error!("error reading repo contents; got err: {}", err);
+                    error!("error reading repo contents; got err: {err}");
                     return;
                 }
             };
@@ -117,10 +117,10 @@ impl GitImpl {
             .output()
         {
             Ok(ok) => {
-                info!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
+                info!("successfully cloned to : {repo_dest}; got: {ok:?}");
             }
             Err(err) => {
-                error!("error cloning to: {}, got: {:?}", repo_dest, err);
+                error!("error cloning to: {repo_dest}, got: {err:?}");
 
                 let dest = path::Path::new(repo_dest);
                 if dest.exists() {
@@ -155,13 +155,13 @@ impl Git for GitImpl {
     fn clone_repo(&self, repo_dest: &str, remote_tag: Option<&str>, remote_pkg: &str) {
         let repo_dest_path = std::path::Path::new(repo_dest);
 
-        info!("repo_path: {:?}", repo_dest_path);
+        info!("repo_path: {repo_dest_path:?}");
 
         if repo_dest_path.exists() {
             let mut repo_contents = match repo_dest_path.read_dir() {
                 Ok(contents) => contents,
                 Err(err) => {
-                    error!("error reading repo contents; got err: {}", err);
+                    error!("error reading repo contents; got err: {err}");
                     return;
                 }
             };
@@ -192,7 +192,7 @@ impl Git for GitImpl {
             None => self.remote_urls.clone(),
         };
 
-        info!("got git host: {:?}", remotes);
+        info!("got git host: {remotes:?}");
 
         for origin in remotes {
             match Command::new("git")
@@ -212,7 +212,7 @@ impl Git for GitImpl {
                 .output()
             {
                 Ok(ok) => {
-                    info!("successfully cloned to : {}; got: {:?}", repo_dest, ok);
+                    info!("successfully cloned to : {repo_dest}; got: {ok:?}");
                     if let Some(tag) = remote_tag {
                         if GitImpl::is_valid_commit_hash(tag) {
                             match Command::new("git")
@@ -250,7 +250,7 @@ impl Git for GitImpl {
                     break;
                 }
                 Err(err) => {
-                    error!("error cloning to: {}, got: {:?}", repo_dest, err);
+                    error!("error cloning to: {repo_dest}, got: {err:?}");
 
                     let dest = path::Path::new(repo_dest);
                     if dest.exists() {
@@ -289,12 +289,12 @@ impl Git for GitImpl {
                 // TODO: dirty hack, fix it when time
                 let file = prepend_if_needed(file, '/');
                 let file_path = format!("{repo_dest}{file}");
-                debug!("filepath: {}", file_path);
+                debug!("filepath: {file_path}");
 
                 let content = match std::fs::read_to_string(&file_path) {
                     Ok(content) => content,
                     Err(err) => {
-                        error!("error reading content from: {}; got err {}", file_path, err);
+                        error!("error reading content from: {file_path}; got err {err}");
                         return None;
                     }
                 };
@@ -302,7 +302,7 @@ impl Git for GitImpl {
                 let uri = match Url::parse(format!("file://{file_path}").as_str()) {
                     Ok(uri) => uri,
                     Err(err) => {
-                        error!("error generating uri; got err {}", err);
+                        error!("error generating uri; got err {err}");
                         return None;
                     }
                 };

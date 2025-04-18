@@ -76,7 +76,7 @@ impl LSPHandlers {
         };
 
         if let Err(err) = events.index_workspace(events.cfg.root_dir.as_str()) {
-            error!("error indexing workspace; err: {}", err);
+            error!("error indexing workspace; err: {err}");
         }
 
         //if let Err(err) = events.build_all_nodes(cfg.clone()) {
@@ -2112,7 +2112,7 @@ impl LSPHandlers {
             }
 
             if !current.trim().is_empty() && !path_str.contains(&current) {
-                debug!("path: {:?} doesnt contain: {:?}", path_str, current);
+                debug!("path: {path_str:?} doesnt contain: {current:?}");
                 continue;
             }
 

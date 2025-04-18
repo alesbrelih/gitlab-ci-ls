@@ -308,10 +308,7 @@ impl Treesitter for TreesitterImpl {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
-                        error!(
-                            "environemnt spans over multiple rows: uri: {} text: {}",
-                            uri, text
-                        );
+                        error!("environemnt spans over multiple rows: uri: {uri} text: {text}");
 
                         continue;
                     }
@@ -363,10 +360,7 @@ impl Treesitter for TreesitterImpl {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
-                        error!(
-                            "STAGE: extends spans over multiple rows: uri: {} text: {}",
-                            uri, text
-                        );
+                        error!("STAGE: extends spans over multiple rows: uri: {uri} text: {text}");
 
                         continue;
                     }
@@ -421,8 +415,7 @@ impl Treesitter for TreesitterImpl {
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
                         error!(
-                            "ALL STAGES: extends spans over multiple rows: uri: {} text: {}",
-                            uri, text
+                            "ALL STAGES: extends spans over multiple rows: uri: {uri} text: {text}"
                         );
 
                         continue;
@@ -481,10 +474,7 @@ impl Treesitter for TreesitterImpl {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
-                        error!(
-                            "ALL: extends spans over multiple rows: uri: {} text: {}",
-                            uri, text
-                        );
+                        error!("ALL: extends spans over multiple rows: uri: {uri} text: {text}",);
 
                         continue;
                     }
@@ -683,7 +673,7 @@ impl Treesitter for TreesitterImpl {
                                 error!("invalid index: {}", c.index);
                                 error!(
                                     "invalid index content: {}",
-                                    content[c.node.byte_range()].to_string()
+                                    &content[c.node.byte_range()].to_string()
                                 );
 
                                 parser::PositionType::None
@@ -727,10 +717,7 @@ impl Treesitter for TreesitterImpl {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
-                        error!(
-                            "ALL: extends spans over multiple rows: uri: {} text: {}",
-                            uri, text
-                        );
+                        error!("ALL: extends spans over multiple rows: uri: {uri} text: {text}");
 
                         continue;
                     }
@@ -1053,10 +1040,7 @@ impl Treesitter for TreesitterImpl {
                     let text = &content[c.node.byte_range()];
                     if c.node.start_position().row != c.node.end_position().row {
                         // sanity check
-                        error!(
-                            "ALL: extends spans over multiple rows: uri: {} text: {}",
-                            uri, text
-                        );
+                        error!("ALL: extends spans over multiple rows: uri: {uri} text: {text}");
 
                         continue;
                     }

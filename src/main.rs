@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::Parser;
 use gitlab_ci_ls_parser::LSPExperimental;
-use log::{error, info, warn, LevelFilter};
+use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -118,7 +118,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         match serde_json::from_value::<InitializationParams>(initialization_params.clone()) {
             Ok(p) => p,
             Err(err) => {
-                error!("error deserializing init params; got err {}", err);
+                error!("error deserializing init params; got err {err}");
 
                 InitializationParams {
                     root_path: String::new(),
@@ -224,7 +224,7 @@ fn save_base_files(
 
     let gitlab_predefined = include_str!("./resources/gitlab_predefined_vars.yaml");
     let gitlab_predefined_path = format!("{base_path}/gitlab_predefined_vars.yaml");
-    info!("predefined path: {}", gitlab_predefined_path);
+    info!("predefined path: {gitlab_predefined_path}");
 
     let mut file = File::create(&gitlab_predefined_path)
         .map_err(|e| anyhow!("error creating file: {gitlab_predefined_path}; got err: {e}"))?;

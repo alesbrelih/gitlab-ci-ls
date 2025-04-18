@@ -43,7 +43,7 @@ impl Messages {
                 "textDocument/didChange" => self.events.on_change(notification),
                 "textDocument/didSave" => self.events.on_save(notification),
                 _ => {
-                    warn!("invalid notification method: {:?}", notification);
+                    warn!("invalid notification method: {notification:?}");
                     None
                 }
             },
@@ -59,12 +59,12 @@ impl Messages {
                     exit(0);
                 }
                 method => {
-                    warn!("invalid request method: {:?}", method);
+                    warn!("invalid request method: {method:?}");
                     None
                 }
             },
             Message::Response(request) => {
-                warn!("unhandled message {:?}", request);
+                warn!("unhandled message {request:?}");
                 None
             }
         };
@@ -85,35 +85,35 @@ fn handle_result(msg: &Message, result: Option<LSPResult>) -> Option<Message> {
 
     match result {
         Some(LSPResult::Hover(hover_result)) => {
-            info!("send hover msg: {:?}", hover_result);
+            info!("send hover msg: {hover_result:?}");
             Some(hover(hover_result))
         }
         Some(LSPResult::Completion(completion_result)) => {
-            info!("send completion msg: {:?}", completion_result);
+            info!("send completion msg: {completion_result:?}");
             Some(completion(completion_result))
         }
         Some(LSPResult::Definition(definition_result)) => {
-            info!("send definition msg: {:?}", definition_result);
+            info!("send definition msg: {definition_result:?}");
             Some(definition(definition_result))
         }
         Some(LSPResult::References(references_result)) => {
-            info!("send references msg: {:?}", references_result);
+            info!("send references msg: {references_result:?}");
             Some(references(references_result))
         }
         Some(LSPResult::Diagnostics(diagnostics_result)) => {
-            info!("send definition msg: {:?}", diagnostics_result);
+            info!("send definition msg: {diagnostics_result:?}");
             Some(diagnostics(diagnostics_result))
         }
         Some(LSPResult::PrepareRename(res)) => {
-            info!("send prepare rename msg: {:?}", res);
+            info!("send prepare rename msg: {res:?}");
             Some(prepare_rename(res))
         }
         Some(LSPResult::Rename(res)) => {
-            info!("send prepare rename msg: {:?}", res);
+            info!("send prepare rename msg: {res:?}");
             Some(rename(res))
         }
         Some(LSPResult::Error(err)) => {
-            error!("error handling message: {:?} got error: {:?}", msg, err);
+            error!("error handling message: {msg:?} got error: {err:?}");
             null_response(msg)
         }
         None => null_response(msg),

@@ -264,10 +264,7 @@ impl ParserImpl {
         let remote_url = match Url::parse(remote_url) {
             Ok(f) => f,
             Err(err) => {
-                error!(
-                    "could not parse remote URL: {}; got err: {:?}",
-                    remote_url, err
-                );
+                error!("could not parse remote URL: {remote_url}; got err: {err:?}");
 
                 return;
             }
@@ -275,10 +272,7 @@ impl ParserImpl {
         let file = match self.git.fetch_remote(remote_url.clone()) {
             Ok(res) => res,
             Err(err) => {
-                error!(
-                    "error retrieving remote file: {}; got err: {:?}",
-                    remote_url, err
-                );
+                error!("error retrieving remote file: {remote_url}; got err: {err:?}");
 
                 return;
             }
@@ -510,7 +504,7 @@ impl Parser for ParserImpl {
                         ) {
                             Ok(rf) => rf,
                             Err(err) => {
-                                error!("error retrieving remote files: {}", err);
+                                error!("error retrieving remote files: {err}");
 
                                 vec![]
                             }
