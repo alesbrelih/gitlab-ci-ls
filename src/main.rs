@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use std::result::Result::Ok;
 use clap::Parser;
 use gitlab_ci_ls_parser::LSPExperimental;
 use log::{error, info, LevelFilter};
@@ -72,7 +73,10 @@ fn default_log_path() -> String {
 }
 
 fn default_cache_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = match std::env::var("HOME") {
+        Ok(val) => val,
+        Err(_err) => std::env::var("USERPROFILE").unwrap_or_default(),
+    };
 
     format!("{home}/.cache/.gitlab-ci-ls")
 }
@@ -135,7 +139,10 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             }
         };
 
-    let home_path = std::env::var("HOME")?;
+    let home_path = match std::env::var("HOME") {
+        Ok(val) => val,
+        Err(_err) => std::env::var("USERPROFILE")?,
+    };
     let fs_utils = FSUtilsImpl::new(home_path);
 
     simple_logging::log_to_file(
