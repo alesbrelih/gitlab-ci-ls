@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use log::{error, info};
+use log::{error, info, warn};
 use lsp_types::{Position, Url};
 
 use super::{
@@ -289,16 +289,30 @@ impl ParserImpl {
         parse_results: &mut ParseResults,
         iteration: i32,
     ) -> Option<()> {
-        let current_uri = uri.join(local_url).ok()?;
-        let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
         if follow {
-            self.parse_contents_recursive(
-                parse_results,
-                &current_uri,
-                &current_content,
-                follow,
-                iteration + 1,
-            );
+            if ParserUtils::is_glob(local_url) {
+                let files = ParserUtils::gitlab_style_glob(local_url);
+                for f in files {
+                    let current_uri = uri.join(f.to_str()?).ok()?;
+                    self.parse_local_file(
+                        uri,
+                        current_uri.as_str(),
+                        follow,
+                        parse_results,
+                        iteration,
+                    );
+                }
+            } else {
+                let current_uri = uri.join(local_url).ok()?;
+                let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
+                self.parse_contents_recursive(
+                    parse_results,
+                    &current_uri,
+                    &current_content,
+                    follow,
+                    iteration + 1,
+                );
+            }
         }
         Some(())
     }

@@ -1,6 +1,7 @@
-use log::info;
+use log::{error, info, warn};
 
 use super::GitlabElement;
+use glob::glob;
 
 pub struct ParserUtils {}
 
@@ -205,6 +206,53 @@ impl ParserUtils {
             project: component_parts.join("/"),
             version: component_identificator[1].to_string(),
         })
+    }
+
+    pub(crate) fn is_glob(uri: &str) -> bool {
+        // TODO: kinda should work?
+        uri.contains('*')
+    }
+
+    pub fn gitlab_style_glob(pattern: &str) -> Vec<std::path::PathBuf> {
+        let mut results = Vec::new();
+        let mut excludes = Vec::new();
+
+        // Generate exclude list. Because when using **/* in gitlab
+        // it means it should not match files in the current parent folder.. Only nested subfolders
+        // So this way I can find files that I can exclude from actual glob pattern of **/* which
+        // matches all
+        if pattern.contains("**/*") {
+            let new_pattern = pattern.replace("**/*", "*");
+
+            let files = match glob(&new_pattern) {
+                Ok(files) => files,
+                Err(err) => {
+                    error!("error matching files: {err}");
+                    return vec![];
+                }
+            };
+
+            excludes.extend(files.flatten());
+        }
+
+        // Replace gitlab custom pattern with valid one
+        let mut pattern = pattern.to_string();
+        if pattern.contains("**.") {
+            pattern = pattern.replace("**", "**/*");
+        }
+
+        let files = match glob(&pattern) {
+            Ok(files) => files,
+            Err(err) => {
+                error!("error matching files: {err}");
+                return vec![];
+            }
+        };
+
+        // Exclude current folder files if **/* was specified -> exlcudes were populated.
+        results.extend(files.flatten().filter(|x| !excludes.contains(x)));
+
+        results
     }
 }
 
