@@ -1,10 +1,10 @@
 use anyhow::anyhow;
-use std::result::Result::Ok;
 use clap::Parser;
 use gitlab_ci_ls_parser::LSPExperimental;
 use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::result::Result::Ok;
 
 use lsp_server::Connection;
 use lsp_types::{ServerCapabilities, TextDocumentSyncKind, WorkDoneProgressOptions};
