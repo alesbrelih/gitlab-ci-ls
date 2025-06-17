@@ -65,11 +65,10 @@ Easiest way to use this using neovim is to install it using [mason](https://gith
 Example how to add it:
 
 ```lua
-vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
-  pattern = "*.gitlab-ci*.{yml,yaml}",
-  callback = function()
-    vim.bo.filetype = "yaml.gitlab"
-  end,
+vim.filetype.add({
+  pattern = {
+    ['%.gitlab%-ci%.ya?ml'] = 'yaml.gitlab',
+  },
 })
 ```
 
