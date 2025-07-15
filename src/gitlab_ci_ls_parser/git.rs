@@ -86,7 +86,7 @@ impl GitImpl {
     fn clone_component_repo(repo_dest: &str, component_info: &ComponentInfo) {
         let repo_dest_path = std::path::Path::new(&repo_dest);
 
-        info!("repo_path: {repo_dest_path:?}");
+        info!("repo_path: {}", repo_dest_path.display());
 
         if repo_dest_path.exists() {
             let mut repo_contents = match repo_dest_path.read_dir() {
@@ -155,7 +155,7 @@ impl Git for GitImpl {
     fn clone_repo(&self, repo_dest: &str, remote_tag: Option<&str>, remote_pkg: &str) {
         let repo_dest_path = std::path::Path::new(repo_dest);
 
-        info!("repo_path: {repo_dest_path:?}");
+        info!("repo_path: {}", repo_dest_path.display());
 
         if repo_dest_path.exists() {
             let mut repo_contents = match repo_dest_path.read_dir() {
