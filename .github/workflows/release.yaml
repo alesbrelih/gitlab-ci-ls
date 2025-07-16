@@ -166,15 +166,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           DEBUG: semantic-release:*
-
-      - name: Homebrew tap version sync
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.HOMEBREW_SYNC_REPO_PAT }}
-          repository: alesbrelih/homebrew-gitlab-ci-ls
-          event-type: version-update
-          client-payload: |
-            {
-              "version": "${{ github.event.release.tag_name }}",
-              "source_repo": "${{ github.repository }}"
-            }
