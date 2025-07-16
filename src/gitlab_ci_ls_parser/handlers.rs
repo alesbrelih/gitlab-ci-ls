@@ -806,12 +806,12 @@ impl LSPHandlers {
         let word = parser_utils::ParserUtils::word_before_cursor(
             line,
             position.character as usize,
-            |c: char| c.is_whitespace() || c == '"' || c == '\'',
+            |c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '[',
         );
 
         let after =
             parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
-                c.is_whitespace() || c == '"' || c == '\''
+                c.is_whitespace() || c == '"' || c == '\'' || c == ']'
             });
 
         // autocomplete filtering by stage; experimental opt infeature due to longer responses ATM
@@ -923,13 +923,14 @@ impl LSPHandlers {
         let word = parser_utils::ParserUtils::word_before_cursor(
             line,
             position.character as usize,
-            |c: char| c.is_whitespace(),
+            |c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '[',
         );
 
-        let after =
-            parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
-                c.is_whitespace()
-            });
+        let after = parser_utils::ParserUtils::word_after_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ']',
+        );
 
         let items = nodes
             .values()

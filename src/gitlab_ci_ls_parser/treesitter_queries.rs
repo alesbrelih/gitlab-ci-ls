@@ -17,6 +17,7 @@ impl TreesitterQueries {
             key: (flow_node) @key
             value: [
                 (flow_node(plain_scalar(string_scalar))) @value
+                (flow_node(flow_sequence(flow_node)@value))
                 (block_node(block_sequence(block_sequence_item(flow_node)@value)))
             ]
             (#eq? @key "extends")
@@ -207,6 +208,7 @@ impl TreesitterQueries {
                 key: (flow_node) @keyextends
                 value: [
                     (flow_node(plain_scalar(string_scalar))) @extends
+                    (flow_node(flow_sequence(flow_node) @extends ))
                     (block_node(block_sequence(block_sequence_item) @extends))
                 ]
                 (#eq? @keyextends "extends")

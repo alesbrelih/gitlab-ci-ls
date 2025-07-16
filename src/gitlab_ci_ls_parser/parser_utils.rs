@@ -24,11 +24,11 @@ impl ParserUtils {
         }
 
         let start = line[..char_index]
-            .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '[')
             .map_or(0, |index| index + 1);
 
         let end = line[char_index..]
-            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ']')
             .map_or(line.len(), |index| index + char_index);
 
         Some(&line[start..end])
