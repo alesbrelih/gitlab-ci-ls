@@ -1,0 +1,23 @@
+---
+name: HomebrewSync
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: homebrew tap sync
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_SYNC_REPO_PAT }}
+          repository: alesbrelih/homebrew-gitlab-ci-ls
+          event-type: version-update
+          client-payload: |
+            {
+              "version": "5",
+              "source_repo": "${{ github.repository }}"
+            }
