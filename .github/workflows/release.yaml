@@ -171,4 +171,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          DEBUG: semantic-release:*
+
+      - name: Trigger Homebrew Tap Sync
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_SYNC_REPO_PAT }}
+          repository: alesbrelih/homebrew-gitlab-ci-ls
+          event-type: version-update
+          client-payload: |
+            {
+              "version": "${{ needs.get-next-version.outputs.new_release_version }}",
+              "source_repo": "${{ github.repository }}"
+            }
