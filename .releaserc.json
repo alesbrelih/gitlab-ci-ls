@@ -58,7 +58,7 @@
           "Cargo.toml",
           "Cargo.lock"
         ],
-        "message": "chore(release): ${nextRelease.version} changelog"
+        "message": "chore(release): ${nextRelease.version}"
       }
     ],
     "semantic-release-export-data"
