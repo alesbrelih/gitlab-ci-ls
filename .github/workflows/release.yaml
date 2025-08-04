@@ -180,6 +180,6 @@ jobs:
           event-type: version-update
           client-payload: |
             {
-              "version": "${{ needs.get-next-version.outputs.new_release_version }}",
+              "version": "${{ needs.get-next-version.outputs.new-release-version }}",
               "source_repo": "${{ github.repository }}"
             }
