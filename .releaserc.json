@@ -1,5 +1,7 @@
 {
-  "branches": ["main"],
+  "branches": [
+    "main"
+  ],
   "debug": true,
   "ci": true,
   "dryRun": false,
@@ -52,7 +54,11 @@
     [
       "@semantic-release/git",
       {
-        "assets": ["Cargo.toml", "Cargo.lock"]
+        "assets": [
+          "Cargo.toml",
+          "Cargo.lock"
+        ],
+        "message": "chore(release): ${nextRelease.version} changelog"
       }
     ],
     "semantic-release-export-data"
