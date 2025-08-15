@@ -3,11 +3,8 @@ pub struct TreesitterQueries {}
 impl TreesitterQueries {
     pub fn get_all_extends(extend_name: Option<&str>) -> String {
         let mut search = String::new();
-        if extend_name.is_some() {
-            let extend_name = extend_name.unwrap();
-            search = format!(
-                r#"(#any-of? @value "{extend_name}" "'{extend_name}'" "\"{extend_name}\"")"#,
-            );
+        if let Some(e) = extend_name {
+            search = format!(r#"(#any-of? @value "{e}" "'{e}'" "\"{e}\"")"#,);
         }
 
         format!(
@@ -163,10 +160,8 @@ impl TreesitterQueries {
 
     pub fn get_all_rule_references(rule: Option<&str>) -> String {
         let mut search = String::new();
-        if rule.is_some() {
-            let rule = rule.unwrap();
-            search =
-                format!(r#"(#any-of? @rule_reference_value "{rule}" "'{rule}'" "\"{rule}\"")"#,);
+        if let Some(r) = rule {
+            search = format!(r#"(#any-of? @rule_reference_value "{r}" "'{r}'" "\"{r}\"")"#,);
         }
 
         format!(
@@ -649,11 +644,8 @@ impl TreesitterQueries {
 
     pub fn get_all_job_needs(needs_name: Option<&str>) -> String {
         let mut search = String::new();
-        if needs_name.is_some() {
-            let needs_name = needs_name.unwrap();
-            search = format!(
-                r#"(#any-of? @needs_job_value "{needs_name}" "'{needs_name}'" "\"{needs_name}\"")"#,
-            );
+        if let Some(n) = needs_name {
+            search = format!(r#"(#any-of? @needs_job_value "{n}" "'{n}'" "\"{n}\"")"#,);
         }
 
         format!(
