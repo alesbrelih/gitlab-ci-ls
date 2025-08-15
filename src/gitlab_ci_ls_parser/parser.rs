@@ -10,8 +10,8 @@ use lsp_types::{Position, Url};
 use super::{
     fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
     GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
-    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, NodeDefinition,
-    ParseResults, RuleReference,
+    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, LSPConfig,
+    NodeDefinition, ParseResults, RuleReference,
 };
 
 unsafe impl Sync for ParserImpl {}
@@ -322,7 +322,10 @@ impl ParserImpl {
         parse_results: &mut ParseResults,
         component_id: &str,
     ) -> anyhow::Result<()> {
-        let component_info = match ParserUtils::extract_component_from_uri(component_id) {
+        let component_info = match ParserUtils::extract_component_from_uri(
+            component_id,
+            self.git.get_project_remote_uris(),
+        ) {
             Ok(c) => c,
             Err(err) => {
                 return Err(anyhow::anyhow!(

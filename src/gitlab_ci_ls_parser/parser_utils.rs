@@ -1,7 +1,9 @@
-use log::{error, info, warn};
+use std::env;
 
 use super::GitlabElement;
 use glob::glob;
+use log::{error, info};
+use temp_env::with_var;
 
 pub struct ParserUtils {}
 
@@ -178,7 +180,10 @@ impl ParserUtils {
         Err(anyhow::anyhow!("could not find component"))
     }
 
-    pub fn extract_component_from_uri(uri: &str) -> anyhow::Result<ComponentInfo> {
+    pub fn extract_component_from_uri(
+        uri: &str,
+        git_remote_uris: Vec<String>,
+    ) -> anyhow::Result<ComponentInfo> {
         let mut component_parts = uri.split('/').collect::<Vec<&str>>();
         if component_parts.len() < 2 {
             return Err(anyhow::anyhow!(
@@ -186,7 +191,17 @@ impl ParserUtils {
             ));
         }
 
-        let host = component_parts.remove(0);
+        let mut host = component_parts.remove(0).to_string();
+        // check if CI_SERVER_FQDN is being used. If so check if env variable is being set else set
+        // to to git host
+        if host.contains("$CI_SERVER_FQDN") {
+            let ci_server_fqdn = env::var("CI_SERVER_FQDN").unwrap_or_else(|_| {
+                return git_remote_uris[0].clone();
+            });
+
+            host = host.replace("$CI_SERVER_FQDN", &ci_server_fqdn)
+        }
+
         let Some(component) = component_parts.pop() else {
             return Err(anyhow::anyhow!(
                 "could not get last element from component uri"
@@ -272,12 +287,57 @@ mod tests {
             host: "gitlab.com".to_string(),
         };
 
-        let got = match ParserUtils::extract_component_from_uri(component_uri) {
+        let got = match ParserUtils::extract_component_from_uri(
+            component_uri,
+            ["test".to_string()].to_vec(),
+        ) {
             Ok(c) => c,
             Err(err) => panic!("unable to extract; got: {err}"),
         };
 
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn test_extract_component_from_uri_ci_server_fqdn_no_environment_variable() {
+        let component_uri = "$CI_SERVER_FQDN/some-project/sub-project/component@1.0.0";
+        let want = ComponentInfo {
+            component: "component".to_string(),
+            version: "1.0.0".to_string(),
+            project: "some-project/sub-project".to_string(),
+            host: "test-host-uri".to_string(),
+        };
+
+        let got = match ParserUtils::extract_component_from_uri(
+            component_uri,
+            ["test-host-uri".to_string()].to_vec(),
+        ) {
+            Ok(c) => c,
+            Err(err) => panic!("unable to extract; got: {err}"),
+        };
+
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn test_extract_component_from_uri_ci_server_fqdn_with_environment_variable() {
+        with_var("CI_SERVER_FQDN", Some("env-host-uri"), || {
+            let component_uri = "$CI_SERVER_FQDN/some-project/sub-project/component@1.0.0";
+            let want = ComponentInfo {
+                component: "component".to_string(),
+                version: "1.0.0".to_string(),
+                project: "some-project/sub-project".to_string(),
+                host: "fenv-host-uri".to_string(),
+            };
+            let got = match ParserUtils::extract_component_from_uri(
+                component_uri,
+                ["test-host-uri".to_string()].to_vec(),
+            ) {
+                Ok(c) => c,
+                Err(err) => panic!("unable to extract; got: {err}"),
+            };
+            assert_eq!(got, want);
+        });
     }
 
     #[test]

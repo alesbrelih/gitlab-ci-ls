@@ -28,6 +28,7 @@ crc64 = "2.0.0"
 clap = { version = "4.5.43", features = ["derive"] }
 mockall = "0.13.1"
 glob = "0.3.3"
+temp-env = "0.3.6"
 
 [lints.clippy]
 all = "deny"

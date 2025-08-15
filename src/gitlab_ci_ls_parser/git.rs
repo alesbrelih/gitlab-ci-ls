@@ -28,6 +28,7 @@ pub trait Git {
         &self,
         component_info: ComponentInfo,
     ) -> anyhow::Result<GitlabElement>;
+    fn get_project_remote_uris(&self) -> Vec<String>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -402,6 +403,10 @@ impl Git for GitImpl {
 
         GitImpl::clone_component_repo(repo_dest.as_str(), &component_info);
         ParserUtils::get_component(&repo_dest, &component_info.component)
+    }
+
+    fn get_project_remote_uris(&self) -> Vec<String> {
+        return self.remote_urls.clone();
     }
 }
 
