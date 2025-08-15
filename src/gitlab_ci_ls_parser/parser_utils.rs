@@ -324,7 +324,7 @@ mod tests {
                 component: "component".to_string(),
                 version: "1.0.0".to_string(),
                 project: "some-project/sub-project".to_string(),
-                host: "fenv-host-uri".to_string(),
+                host: "env-host-uri".to_string(),
             };
             let got = match ParserUtils::extract_component_from_uri(
                 component_uri,
