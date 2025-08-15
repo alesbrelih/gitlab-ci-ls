@@ -362,6 +362,7 @@ pub enum InputValue {
 pub struct ComponentInclude {
     component: String,
 
+    #[serde(default)]
     #[serde(deserialize_with = "deserialize_inputs")]
     inputs: Option<HashMap<String, InputValue>>,
 }

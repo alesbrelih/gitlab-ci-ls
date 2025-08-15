@@ -536,7 +536,7 @@ impl TreesitterQueries {
                                 (ERROR(flow_node(plain_scalar(string_scalar)@component_input_error)))*
                             ]
                             ))(flow_node)@component_input]
-                        )
+                        )?
                     )
                 ) @full_component
             )
