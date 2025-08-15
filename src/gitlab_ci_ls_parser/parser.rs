@@ -324,7 +324,7 @@ impl ParserImpl {
     ) -> anyhow::Result<()> {
         let component_info = match ParserUtils::extract_component_from_uri(
             component_id,
-            self.git.get_project_remote_uris(),
+            &self.git.get_project_remote_uris(),
         ) {
             Ok(c) => c,
             Err(err) => {

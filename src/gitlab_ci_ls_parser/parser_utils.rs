@@ -182,7 +182,7 @@ impl ParserUtils {
 
     pub fn extract_component_from_uri(
         uri: &str,
-        git_remote_uris: Vec<String>,
+        git_remote_uris: &[String],
     ) -> anyhow::Result<ComponentInfo> {
         let mut component_parts = uri.split('/').collect::<Vec<&str>>();
         if component_parts.len() < 2 {
@@ -195,11 +195,10 @@ impl ParserUtils {
         // check if CI_SERVER_FQDN is being used. If so check if env variable is being set else set
         // to to git host
         if host.contains("$CI_SERVER_FQDN") {
-            let ci_server_fqdn = env::var("CI_SERVER_FQDN").unwrap_or_else(|_| {
-                return git_remote_uris[0].clone();
-            });
+            let ci_server_fqdn =
+                env::var("CI_SERVER_FQDN").unwrap_or_else(|_| git_remote_uris[0].clone());
 
-            host = host.replace("$CI_SERVER_FQDN", &ci_server_fqdn)
+            host = host.replace("$CI_SERVER_FQDN", &ci_server_fqdn);
         }
 
         let Some(component) = component_parts.pop() else {
@@ -287,13 +286,11 @@ mod tests {
             host: "gitlab.com".to_string(),
         };
 
-        let got = match ParserUtils::extract_component_from_uri(
-            component_uri,
-            ["test".to_string()].to_vec(),
-        ) {
-            Ok(c) => c,
-            Err(err) => panic!("unable to extract; got: {err}"),
-        };
+        let got =
+            match ParserUtils::extract_component_from_uri(component_uri, &["test".to_string()]) {
+                Ok(c) => c,
+                Err(err) => panic!("unable to extract; got: {err}"),
+            };
 
         assert_eq!(got, want);
     }
@@ -310,7 +307,7 @@ mod tests {
 
         let got = match ParserUtils::extract_component_from_uri(
             component_uri,
-            ["test-host-uri".to_string()].to_vec(),
+            &["test-host-uri".to_string()],
         ) {
             Ok(c) => c,
             Err(err) => panic!("unable to extract; got: {err}"),
@@ -331,7 +328,7 @@ mod tests {
             };
             let got = match ParserUtils::extract_component_from_uri(
                 component_uri,
-                ["test-host-uri".to_string()].to_vec(),
+                &["test-host-uri".to_string()],
             ) {
                 Ok(c) => c,
                 Err(err) => panic!("unable to extract; got: {err}"),

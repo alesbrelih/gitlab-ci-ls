@@ -406,7 +406,7 @@ impl Git for GitImpl {
     }
 
     fn get_project_remote_uris(&self) -> Vec<String> {
-        return self.remote_urls.clone();
+        self.remote_urls.clone()
     }
 }
 
