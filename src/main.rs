@@ -1,13 +1,16 @@
 use anyhow::anyhow;
 use clap::Parser;
 use gitlab_ci_ls_parser::LSPExperimental;
-use log::{error, info, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::result::Result::Ok;
 
 use lsp_server::Connection;
-use lsp_types::{ServerCapabilities, TextDocumentSyncKind, WorkDoneProgressOptions};
+use lsp_types::{
+    SaveOptions, ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, WorkDoneProgressOptions,
+};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -24,7 +27,7 @@ mod gitlab_ci_ls_parser;
 #[command(version, about, long_about = None)]
 struct Args {}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct InitializationOptions {
     #[serde(default = "default_package_map")]
     package_map: HashMap<String, String>,
@@ -39,24 +42,50 @@ struct InitializationOptions {
     options: Options,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct Options {
     #[serde(default = "default_dependencies_autocomplete_stage_filtering")]
     dependencies_autocomplete_stage_filtering: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct InitializationParams {
-    #[serde(rename = "initializationOptions")]
+    #[serde(
+        rename = "initializationOptions",
+        default = "default_initialization_options"
+    )]
     initialization_options: InitializationOptions,
 
     #[serde(rename = "rootPath")]
-    root_path: String,
+    root_path: Option<String>,
+
+    #[serde(rename = "rootUri")]
+    root_uri: String,
+}
+
+impl InitializationParams {
+    fn get_root(&self) -> String {
+        let root_path = match &self.root_path {
+            Some(path) => path.clone(),
+            None => self.root_uri.clone(),
+        };
+
+        root_path.replace("file://", "")
+    }
 }
 
 fn default_options() -> Options {
     Options {
         dependencies_autocomplete_stage_filtering: false,
+    }
+}
+
+fn default_initialization_options() -> InitializationOptions {
+    InitializationOptions {
+        package_map: default_package_map(),
+        log_path: default_log_path(),
+        cache_path: default_cache_path(),
+        options: default_options(),
     }
 }
 
@@ -88,8 +117,16 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
     let server_capabilities = serde_json::to_value(ServerCapabilities {
-        text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Kind(
-            TextDocumentSyncKind::FULL,
+        text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
+            TextDocumentSyncOptions {
+                open_close: Some(true),
+                change: Some(TextDocumentSyncKind::FULL),
+                will_save: Some(false),
+                will_save_wait_until: Some(false),
+                save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                    include_text: Some(true),
+                })),
+            },
         )),
         hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         definition_provider: Some(lsp_types::OneOf::Left(true)),
@@ -125,7 +162,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 error!("error deserializing init params; got err {err}");
 
                 InitializationParams {
-                    root_path: String::new(),
+                    root_path: Some(String::new()),
+                    root_uri: String::new(),
                     initialization_options: InitializationOptions {
                         log_path: default_log_path(),
                         package_map: HashMap::new(),
@@ -150,12 +188,13 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         LevelFilter::Warn,
     )?;
 
-    let remote_urls = match get_git_remotes(&init_params.root_path) {
+    let remote_urls = match get_git_remotes(&init_params.get_root()) {
         Ok(u) => u,
         Err(err) => {
             error!(
                 "error getting git remotes at: {}; got err: {:?}",
-                &init_params.root_path, err
+                &init_params.get_root(),
+                err
             );
             vec![]
         }
@@ -171,9 +210,9 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 .get_path(&init_params.initialization_options.cache_path)
                 .to_string_lossy()
                 .to_string(),
-            package_map: init_params.initialization_options.package_map,
+            package_map: init_params.initialization_options.package_map.clone(),
             remote_urls,
-            root_dir: init_params.root_path,
+            root_dir: init_params.get_root().clone(),
             experimental: LSPExperimental {
                 dependencies_autocomplete_stage_filtering: init_params
                     .initialization_options
