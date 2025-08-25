@@ -1,4 +1,11 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Instant};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Mutex,
+    time::Instant,
+};
 
 use anyhow::anyhow;
 use log::{debug, error, info, warn};
@@ -11,8 +18,8 @@ use lsp_types::{
 use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
-    parser_utils::ParserUtils, DiagnosticsNotification, NodeDefinition, PrepareRenameResult,
-    RenameResult, DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
+    parser_utils::ParserUtils, DiagnosticsNotification, LspConfiguration, NodeDefinition,
+    PrepareRenameResult, RenameResult, DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
 };
 
 use super::{
@@ -1152,8 +1159,8 @@ impl LSPHandlers {
         let mut all_components = self.components.lock().unwrap();
 
         info!("importing from root file");
-        let mut root = Url::parse(format!("file://{root_dir}/").as_str())?;
-        info!("uri: {}", &root);
+        let project_root_dir = Url::parse(format!("file://{root_dir}/").as_str())?;
+        info!("uri: {}", &project_root_dir);
 
         info!("importing files from base");
         let base_uri = format!("{}base", self.cfg.cache_path);
@@ -1164,7 +1171,7 @@ impl LSPHandlers {
 
             if let Some(results) =
                 self.parser
-                    .parse_contents(&file_uri, &file_content, &root, false)
+                    .parse_contents(&file_uri, &file_content, &project_root_dir, true)
             {
                 for file in results.files {
                     info!("found file: {:?}", &file);
@@ -1199,11 +1206,33 @@ impl LSPHandlers {
 
         let list = std::fs::read_dir(root_dir)?;
         let mut root_files: Vec<PathBuf> = vec![];
+        let mut config_file: Option<PathBuf> = None;
 
         for item in list.flatten() {
             if item.file_name() == ".gitlab-ci.yaml" || item.file_name() == ".gitlab-ci.yml" {
                 root_files.push(item.path());
-                break;
+            }
+            if item.file_name() == ".gitlab-ci-ls.yaml" || item.file_name() == ".gitlab-ci-ls.yml" {
+                config_file = Some(item.path());
+            }
+        }
+
+        // parse config file to struct
+        if let Some(config) = config_file {
+            let config_content = std::fs::read_to_string(&config)?;
+            let lsp_config = match serde_yaml::from_str(&config_content) {
+                Ok(c) => c,
+                Err(err) => {
+                    warn!("error parsing config file: {err}");
+                    LspConfiguration::default()
+                }
+            };
+
+            if let Some(files) = lsp_config.root_files {
+                root_files = files
+                    .iter()
+                    .map(|f| PathBuf::from(project_root_dir.join(f).unwrap().path()))
+                    .collect();
             }
         }
 
@@ -1212,15 +1241,27 @@ impl LSPHandlers {
         }
 
         for root_file in root_files {
-            let file_name = root_file.file_name().unwrap().to_str().unwrap();
-            root = root.join(file_name)?;
-
             let root_file_content = std::fs::read_to_string(&root_file)?;
 
-            info!("URI: {}", &root);
+            let file = {
+                let Some(root_file_str) = root_file.to_str() else {
+                    // continue to next root file if its there
+                    continue;
+                };
+
+                let root_file_str_with_schema = format!("file://{root_file_str}");
+                match Url::parse(&root_file_str_with_schema) {
+                    Ok(u) => u,
+                    Err(err) => {
+                        warn!("could not parse root file: {root_file_str_with_schema}; got err: {err}");
+                        continue;
+                    }
+                }
+            };
+
             if let Some(results) =
                 self.parser
-                    .parse_contents(&root, &root_file_content, &root, true)
+                    .parse_contents(&file, &root_file_content, &project_root_dir, true)
             {
                 for file in results.files {
                     info!("found file: {:?}", &file);

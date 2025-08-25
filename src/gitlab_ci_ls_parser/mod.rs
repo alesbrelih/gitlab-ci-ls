@@ -390,5 +390,11 @@ where
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct LspConfiguration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    root_files: Option<Vec<String>>,
+}
+
 const DEFAULT_BRANCH_SUBFOLDER: &str = "default";
 const MAX_CACHE_ITEMS: usize = 4;
