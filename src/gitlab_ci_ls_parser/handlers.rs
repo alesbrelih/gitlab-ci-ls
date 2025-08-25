@@ -339,11 +339,9 @@ impl LSPHandlers {
     }
 
     pub fn on_open(&self, notification: Notification) -> Option<LSPResult> {
-        warn!("OPENING??");
         let in_progress = self.indexing_in_progress.lock().unwrap();
         drop(in_progress);
 
-        warn!("OPENINGwow");
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
 
@@ -1200,82 +1198,81 @@ impl LSPHandlers {
         }
 
         let list = std::fs::read_dir(root_dir)?;
-        let mut root_file: Option<PathBuf> = None;
+        let mut root_files: Vec<PathBuf> = vec![];
 
         for item in list.flatten() {
             if item.file_name() == ".gitlab-ci.yaml" || item.file_name() == ".gitlab-ci.yml" {
-                root_file = Some(item.path());
+                root_files.push(item.path());
                 break;
             }
         }
 
-        let root_file_content = match root_file {
-            Some(root_file) => {
-                let file_name = root_file.file_name().unwrap().to_str().unwrap();
-                root = root.join(file_name)?;
+        if root_files.is_empty() {
+            return Err(anyhow::anyhow!("root file missing"));
+        }
 
-                std::fs::read_to_string(root_file)?
-            }
-            _ => {
-                return Err(anyhow::anyhow!("root file missing"));
-            }
-        };
+        for root_file in root_files {
+            let file_name = root_file.file_name().unwrap().to_str().unwrap();
+            root = root.join(file_name)?;
 
-        info!("URI: {}", &root);
-        if let Some(results) = self
-            .parser
-            .parse_contents(&root, &root_file_content, &root, true)
-        {
-            for file in results.files {
-                info!("found file: {:?}", &file);
-                store.insert(file.path, file.content);
-            }
+            let root_file_content = std::fs::read_to_string(&root_file)?;
 
-            for n in &results.nodes {
-                if let Some(el) = all_nodes_ordered_list.iter_mut().find(|e| e.uri == n.uri) {
-                    el.elements.push(n.clone());
-                } else {
-                    all_nodes_ordered_list.push(GitlabFileElements {
-                        uri: n.uri.clone(),
-                        elements: vec![n.clone()],
-                    });
+            info!("URI: {}", &root);
+            if let Some(results) =
+                self.parser
+                    .parse_contents(&root, &root_file_content, &root, true)
+            {
+                for file in results.files {
+                    info!("found file: {:?}", &file);
+                    store.insert(file.path, file.content);
                 }
-            }
 
-            for node in results.nodes {
-                info!("found node: {:?}", &node);
+                for n in &results.nodes {
+                    if let Some(el) = all_nodes_ordered_list.iter_mut().find(|e| e.uri == n.uri) {
+                        el.elements.push(n.clone());
+                    } else {
+                        all_nodes_ordered_list.push(GitlabFileElements {
+                            uri: n.uri.clone(),
+                            elements: vec![n.clone()],
+                        });
+                    }
+                }
 
-                all_nodes
-                    .entry(node.uri.clone())
-                    .or_default()
-                    .insert(node.key.clone(), node);
-            }
+                for node in results.nodes {
+                    info!("found node: {:?}", &node);
 
-            for stage in &results.stages {
-                info!("found stage: {:?}", &stage);
-                all_stages.insert(stage.key.clone(), stage.clone());
-            }
+                    all_nodes
+                        .entry(node.uri.clone())
+                        .or_default()
+                        .insert(node.key.clone(), node);
+                }
 
-            all_stages_ordered_list.clone_from(
-                &results
-                    .stages
-                    .into_iter()
-                    .map(|s| s.key)
-                    .collect::<Vec<String>>(),
-            );
+                for stage in &results.stages {
+                    info!("found stage: {:?}", &stage);
+                    all_stages.insert(stage.key.clone(), stage.clone());
+                }
 
-            for variable in results.variables {
-                info!("found variable: {:?}", &variable);
-                all_variables.insert(variable.key.clone(), variable);
-            }
+                all_stages_ordered_list.clone_from(
+                    &results
+                        .stages
+                        .into_iter()
+                        .map(|s| s.key)
+                        .collect::<Vec<String>>(),
+                );
 
-            for component in results.components {
-                info!("found component: {:?}", &component);
-                all_components.insert(component.uri.clone(), component);
+                for variable in results.variables {
+                    info!("found variable: {:?}", &variable);
+                    all_variables.insert(variable.key.clone(), variable);
+                }
+
+                for component in results.components {
+                    info!("found component: {:?}", &component);
+                    all_components.insert(component.uri.clone(), component);
+                }
             }
         }
 
-        error!("INDEX WORKSPACE ELAPSED: {:?}", start.elapsed());
+        info!("INDEX WORKSPACE ELAPSED: {:?}", start.elapsed());
 
         Ok(())
     }
