@@ -263,9 +263,19 @@ impl LSPHandlers {
 
         let mut all_components = self.components.lock().unwrap();
 
+        let root_u = format!("file://{}", &self.cfg.root_dir);
+        let u = match Url::parse(&root_u) {
+            Ok(res) => res,
+            Err(err) => {
+                warn!("err: {err}");
+                return None;
+            }
+        };
+
         if let Some(results) = self.parser.parse_contents(
             &params.text_document.uri,
             &params.content_changes.first()?.text,
+            &u,
             false,
         ) {
             for file in results.files {
@@ -329,9 +339,11 @@ impl LSPHandlers {
     }
 
     pub fn on_open(&self, notification: Notification) -> Option<LSPResult> {
+        warn!("OPENING??");
         let in_progress = self.indexing_in_progress.lock().unwrap();
         drop(in_progress);
 
+        warn!("OPENINGwow");
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
 
@@ -339,10 +351,21 @@ impl LSPHandlers {
         let mut all_nodes = self.nodes.lock().unwrap();
         let mut all_stages = self.stages.lock().unwrap();
 
-        if let Some(results) =
-            self.parser
-                .parse_contents(&params.text_document.uri, &params.text_document.text, true)
-        {
+        let root_u = format!("file://{}", &self.cfg.root_dir);
+        let u = match Url::parse(&root_u) {
+            Ok(res) => res,
+            Err(err) => {
+                warn!("err: {err}");
+                return None;
+            }
+        };
+
+        if let Some(results) = self.parser.parse_contents(
+            &params.text_document.uri,
+            &params.text_document.text,
+            &u,
+            true,
+        ) {
             for file in results.files {
                 store.insert(file.path, file.content);
             }
@@ -1130,6 +1153,10 @@ impl LSPHandlers {
         let mut all_variables = self.variables.lock().unwrap();
         let mut all_components = self.components.lock().unwrap();
 
+        info!("importing from root file");
+        let mut root = Url::parse(format!("file://{root_dir}/").as_str())?;
+        info!("uri: {}", &root);
+
         info!("importing files from base");
         let base_uri = format!("{}base", self.cfg.cache_path);
         let base_uri_path = Url::parse(format!("file://{base_uri}/").as_str())?;
@@ -1137,7 +1164,10 @@ impl LSPHandlers {
             let file_uri = base_uri_path.join(dir.file_name().to_str().unwrap())?;
             let file_content = std::fs::read_to_string(dir.path())?;
 
-            if let Some(results) = self.parser.parse_contents(&file_uri, &file_content, false) {
+            if let Some(results) =
+                self.parser
+                    .parse_contents(&file_uri, &file_content, &root, false)
+            {
                 for file in results.files {
                     info!("found file: {:?}", &file);
                     store.insert(file.path, file.content);
@@ -1169,10 +1199,6 @@ impl LSPHandlers {
             }
         }
 
-        info!("importing from root file");
-        let mut uri = Url::parse(format!("file://{root_dir}/").as_str())?;
-        info!("uri: {}", &uri);
-
         let list = std::fs::read_dir(root_dir)?;
         let mut root_file: Option<PathBuf> = None;
 
@@ -1186,7 +1212,7 @@ impl LSPHandlers {
         let root_file_content = match root_file {
             Some(root_file) => {
                 let file_name = root_file.file_name().unwrap().to_str().unwrap();
-                uri = uri.join(file_name)?;
+                root = root.join(file_name)?;
 
                 std::fs::read_to_string(root_file)?
             }
@@ -1195,8 +1221,11 @@ impl LSPHandlers {
             }
         };
 
-        info!("URI: {}", &uri);
-        if let Some(results) = self.parser.parse_contents(&uri, &root_file_content, true) {
+        info!("URI: {}", &root);
+        if let Some(results) = self
+            .parser
+            .parse_contents(&root, &root_file_content, &root, true)
+        {
             for file in results.files {
                 info!("found file: {:?}", &file);
                 store.insert(file.path, file.content);

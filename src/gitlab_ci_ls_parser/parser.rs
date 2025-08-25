@@ -43,12 +43,19 @@ pub trait Parser: Sync {
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_root_node_at_position(&self, content: &str, position: Position)
         -> Option<GitlabElement>;
-    fn parse_contents(&self, uri: &Url, content: &str, _follow: bool) -> Option<ParseResults>;
+    fn parse_contents(
+        &self,
+        uri: &Url,
+        content: &str,
+        root_uri: &Url,
+        _follow: bool,
+    ) -> Option<ParseResults>;
     fn parse_contents_recursive(
         &self,
         parse_results: &mut ParseResults,
         uri: &lsp_types::Url,
         content: &str,
+        root_uri: &Url,
         _follow: bool,
         iteration: i32,
     ) -> Option<()>;
@@ -305,10 +312,12 @@ impl ParserImpl {
             } else {
                 let current_uri = uri.join(local_url).ok()?;
                 let current_content = std::fs::read_to_string(current_uri.path()).ok()?;
+
                 self.parse_contents_recursive(
                     parse_results,
                     &current_uri,
                     &current_content,
+                    uri,
                     follow,
                     iteration + 1,
                 );
@@ -421,7 +430,13 @@ impl Parser for ParserImpl {
         self.treesitter.get_root_node(uri, content, node_key)
     }
 
-    fn parse_contents(&self, uri: &Url, content: &str, follow: bool) -> Option<ParseResults> {
+    fn parse_contents(
+        &self,
+        uri: &Url,
+        content: &str,
+        root_uri: &Url,
+        follow: bool,
+    ) -> Option<ParseResults> {
         let files: Vec<GitlabFile> = vec![];
         let nodes: Vec<GitlabElement> = vec![];
         let stages: Vec<GitlabElement> = vec![];
@@ -436,7 +451,7 @@ impl Parser for ParserImpl {
             variables,
         };
 
-        self.parse_contents_recursive(&mut parse_results, uri, content, follow, 0)?;
+        self.parse_contents_recursive(&mut parse_results, uri, content, root_uri, follow, 0)?;
 
         Some(parse_results)
     }
@@ -447,6 +462,7 @@ impl Parser for ParserImpl {
         parse_results: &mut ParseResults,
         uri: &lsp_types::Url,
         content: &str,
+        root_uri: &lsp_types::Url,
         follow: bool,
         iteration: i32,
     ) -> Option<()> {
@@ -493,7 +509,13 @@ impl Parser for ParserImpl {
             for include_node in include_node.include {
                 match include_node {
                     IncludeItem::Local(node) => {
-                        self.parse_local_file(uri, &node.local, follow, parse_results, iteration)?;
+                        self.parse_local_file(
+                            root_uri,
+                            &node.local,
+                            follow,
+                            parse_results,
+                            iteration,
+                        )?;
                     }
                     IncludeItem::Remote(node) => {
                         self.parse_remote_file(&node.remote, parse_results);
@@ -505,7 +527,7 @@ impl Parser for ParserImpl {
                         } else {
                             info!("got local URL: {include_url}");
                             self.parse_local_file(
-                                uri,
+                                root_uri,
                                 &include_url,
                                 follow,
                                 parse_results,
