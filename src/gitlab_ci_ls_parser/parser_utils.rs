@@ -16,6 +16,14 @@ pub struct ComponentInfo {
 }
 
 impl ParserUtils {
+    fn adjust_to_char_boundary(s: &str, byte_index: usize) -> usize {
+        s.char_indices()
+            .take_while(|(i, _)| *i <= byte_index)
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
     pub fn strip_quotes(value: &str) -> &str {
         value.trim_matches('\'').trim_matches('"')
     }
@@ -25,13 +33,15 @@ impl ParserUtils {
             return None;
         }
 
-        let start = line[..char_index]
+        let adjusted_index = Self::adjust_to_char_boundary(line, char_index);
+
+        let start = line[..adjusted_index]
             .rfind(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '[')
             .map_or(0, |index| index + 1);
 
-        let end = line[char_index..]
+        let end = line[adjusted_index..]
             .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ']')
-            .map_or(line.len(), |index| index + char_index);
+            .map_or(line.len(), |index| index + adjusted_index);
 
         Some(&line[start..end])
     }
@@ -45,15 +55,17 @@ impl ParserUtils {
             return "";
         }
 
-        let start = line[..char_index]
+        let adjusted_index = Self::adjust_to_char_boundary(line, char_index);
+
+        let start = line[..adjusted_index]
             .rfind(predicate)
             .map_or(0, |index| index + 1);
 
-        if start == char_index {
+        if start == adjusted_index {
             return "";
         }
 
-        &line[start..char_index]
+        &line[start..adjusted_index]
     }
 
     pub fn word_after_cursor(
@@ -65,14 +77,14 @@ impl ParserUtils {
             return "";
         }
 
-        let start = char_index;
+        let adjusted_start = Self::adjust_to_char_boundary(line, char_index);
 
-        let end = line[start..]
+        let end = line[adjusted_start..]
             .char_indices()
             .find(|&(_, c)| predicate(c))
-            .map_or(line.len(), |(idx, _)| start + idx);
+            .map_or(line.len(), |(idx, _)| adjusted_start + idx);
 
-        &line[start..end]
+        &line[adjusted_start..end]
     }
 
     pub fn remote_path_to_hash(uri: &str) -> String {
@@ -84,13 +96,15 @@ impl ParserUtils {
             return None;
         }
 
-        let start = line[..char_index]
+        let adjusted_index = Self::adjust_to_char_boundary(line, char_index);
+
+        let start = line[..adjusted_index]
             .rfind(['$', '{'])
             .map_or(0, |index| index + 1);
 
-        let end = line[char_index..]
+        let end = line[adjusted_index..]
             .find(|c: char| !c.is_alphabetic() && c != '_')
-            .map_or(line.len(), |index| index + char_index);
+            .map_or(line.len(), |index| index + adjusted_index);
 
         Some(&line[start..end])
     }
@@ -108,12 +122,15 @@ impl ParserUtils {
             return (String::new(), String::new());
         }
 
+        let adjusted_pos = Self::adjust_to_char_boundary(line, cursor_pos);
+        let char_cursor = line.char_indices().take_while(|(i, _)| *i < adjusted_pos).count();
+
         let mut current_component = String::new();
         let mut previous_components = String::new();
 
         let mut found_current = false;
 
-        for i in (0..cursor_pos).rev() {
+        for i in (0..char_cursor).rev() {
             let c = line.chars().nth(i).unwrap();
             let p = {
                 if i == 0 {
@@ -353,5 +370,14 @@ mod tests {
         let (path, parent) = ParserUtils::find_path_at_cursor(line, cursor);
         assert_eq!(path, "h");
         assert_eq!(parent, "/test/please");
+    }
+
+    #[test]
+    fn test_extract_word_with_emojis() {
+        let line = "  stage: ✅ Test 🕵 Quality 🚀 Deploy";
+        let char_index = 34; // Inside the 🚀 emoji (bytes 31..35)
+        let result = ParserUtils::extract_word(line, char_index);
+        // This should work with the fix
+        assert_eq!(result, Some("🚀"));
     }
 }
