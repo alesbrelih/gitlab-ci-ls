@@ -1,15 +1,6 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Mutex,
-    time::Instant,
-};
-use tempfile::{tempdir, TempDir};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Instant};
 
 use anyhow::anyhow;
-use glob::glob;
 use log::{debug, error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
@@ -1159,26 +1150,22 @@ impl LSPHandlers {
                 let pattern = format!("{}/**/*.gitlab-ci.yml", absolute_path.display());
                 match glob::glob(&pattern) {
                     Ok(paths) => {
-                        for entry in paths {
-                            if let Ok(path) = entry {
-                                resolved_root_files.push(path);
-                            }
+                        for path in paths.flatten() {
+                            resolved_root_files.push(path);
                         }
                     }
-                    Err(e) => warn!("Error globbing directory {}: {}", pattern, e),
+                    Err(e) => warn!("Error globbing directory {pattern}: {e}"),
                 }
             } else if file.contains('*') || file.contains('?') || file.contains('[') {
                 // Handle glob patterns
                 let pattern = absolute_path.display().to_string(); // Use absolute_path for glob pattern
                 match glob::glob(&pattern) {
                     Ok(paths) => {
-                        for entry in paths {
-                            if let Ok(path) = entry {
-                                resolved_root_files.push(path);
-                            }
+                        for path in paths.flatten() {
+                            resolved_root_files.push(path);
                         }
                     }
-                    Err(e) => warn!("Error globbing pattern {}: {}", pattern, e),
+                    Err(e) => warn!("Error globbing pattern {pattern}: {e}"),
                 }
             } else if absolute_path.exists() {
                 // Handle regular file paths
@@ -2328,7 +2315,7 @@ mod tests {
     use super::LSPHandlers;
     use lsp_types::Url;
     use std::fs::{self, File};
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
 
     // Helper function to create a temporary directory and files within it
