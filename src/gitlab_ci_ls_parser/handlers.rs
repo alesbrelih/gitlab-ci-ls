@@ -2505,4 +2505,3 @@ mod tests {
         assert_eq!(resolved, expected);
     }
 }
-
