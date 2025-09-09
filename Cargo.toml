@@ -29,6 +29,7 @@ clap = { version = "4.5.47", features = ["derive"] }
 mockall = "0.13.1"
 glob = "0.3.3"
 temp-env = "0.3.6"
+tempfile = "3.22.0"
 
 [lints.clippy]
 all = "deny"

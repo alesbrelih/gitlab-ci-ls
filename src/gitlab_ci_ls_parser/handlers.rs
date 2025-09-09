@@ -6,8 +6,10 @@ use std::{
     sync::Mutex,
     time::Instant,
 };
+use tempfile::{tempdir, TempDir};
 
 use anyhow::anyhow;
+use glob::glob;
 use log::{debug, error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
@@ -1143,6 +1145,49 @@ impl LSPHandlers {
         Ok(items)
     }
 
+    fn resolve_root_files(files: Vec<String>, project_root_dir: &Url) -> Vec<PathBuf> {
+        let mut resolved_root_files = Vec::new();
+        let project_root_path = project_root_dir.to_file_path().ok().unwrap_or_else(|| {
+            warn!("Could not convert project_root_dir to PathBuf");
+            PathBuf::new()
+        });
+
+        for file in files {
+            let absolute_path = project_root_path.join(&file);
+            if absolute_path.is_dir() {
+                // Handle directories: find all .gitlab-ci.yml files recursively
+                let pattern = format!("{}/**/*.gitlab-ci.yml", absolute_path.display());
+                match glob::glob(&pattern) {
+                    Ok(paths) => {
+                        for entry in paths {
+                            if let Ok(path) = entry {
+                                resolved_root_files.push(path);
+                            }
+                        }
+                    }
+                    Err(e) => warn!("Error globbing directory {}: {}", pattern, e),
+                }
+            } else if file.contains('*') || file.contains('?') || file.contains('[') {
+                // Handle glob patterns
+                let pattern = absolute_path.display().to_string(); // Use absolute_path for glob pattern
+                match glob::glob(&pattern) {
+                    Ok(paths) => {
+                        for entry in paths {
+                            if let Ok(path) = entry {
+                                resolved_root_files.push(path);
+                            }
+                        }
+                    }
+                    Err(e) => warn!("Error globbing pattern {}: {}", pattern, e),
+                }
+            } else if absolute_path.exists() {
+                // Handle regular file paths
+                resolved_root_files.push(absolute_path);
+            }
+        }
+        resolved_root_files
+    }
+
     #[allow(clippy::too_many_lines)]
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let mut in_progress = self.indexing_in_progress.lock().unwrap();
@@ -1229,10 +1274,7 @@ impl LSPHandlers {
             };
 
             if let Some(files) = lsp_config.root_files {
-                root_files = files
-                    .iter()
-                    .map(|f| PathBuf::from(project_root_dir.join(f).unwrap().path()))
-                    .collect();
+                root_files = Self::resolve_root_files(files, &project_root_dir);
             }
         }
 
@@ -2281,3 +2323,186 @@ fn generate_component_diagnostics_from_spec(
         ));
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::LSPHandlers;
+    use lsp_types::Url;
+    use std::fs::{self, File};
+    use std::path::{Path, PathBuf};
+    use tempfile::{tempdir, TempDir};
+
+    // Helper function to create a temporary directory and files within it
+    fn setup_test_environment(files_to_create: &[&str], dirs_to_create: &[&str]) -> TempDir {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let root_path = dir.path();
+
+        for file in files_to_create {
+            let file_path = root_path.join(file);
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).expect("Failed to create parent directories");
+            }
+            File::create(&file_path).expect("Failed to create file");
+        }
+
+        for dir_path in dirs_to_create {
+            fs::create_dir_all(root_path.join(dir_path)).expect("Failed to create directory");
+        }
+
+        dir
+    }
+
+    #[test]
+    fn test_resolve_root_files_empty_input() {
+        let tmp_dir = setup_test_environment(&[], &[]);
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files: Vec<String> = vec![];
+
+        let resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_root_files_single_file() {
+        let tmp_dir = setup_test_environment(&["test_file.gitlab-ci.yml"], &[]);
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec!["test_file.gitlab-ci.yml".to_string()];
+
+        let resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0], tmp_dir.path().join("test_file.gitlab-ci.yml"));
+    }
+
+    #[test]
+    fn test_resolve_root_files_multiple_files() {
+        let tmp_dir = setup_test_environment(
+            &[
+                "file1.gitlab-ci.yml",
+                "subdir/file2.gitlab-ci.yml",
+                "another/path/file3.gitlab-ci.yml",
+            ],
+            &[],
+        );
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec![
+            "file1.gitlab-ci.yml".to_string(),
+            "subdir/file2.gitlab-ci.yml".to_string(),
+            "another/path/file3.gitlab-ci.yml".to_string(),
+        ];
+
+        let mut resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        resolved.sort(); // Sort to ensure consistent order for assertion
+
+        let mut expected: Vec<PathBuf> = vec![
+            tmp_dir.path().join("file1.gitlab-ci.yml"),
+            tmp_dir.path().join("subdir/file2.gitlab-ci.yml"),
+            tmp_dir.path().join("another/path/file3.gitlab-ci.yml"),
+        ];
+        expected.sort();
+
+        assert_eq!(resolved.len(), 3);
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn test_resolve_root_files_non_existent_file() {
+        let tmp_dir = setup_test_environment(&[], &[]);
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec!["non_existent_file.gitlab-ci.yml".to_string()];
+
+        let resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        assert!(resolved.is_empty()); // Non-existent files should not be resolved
+    }
+
+    #[test]
+    fn test_resolve_root_files_directory() {
+        let tmp_dir = setup_test_environment(
+            &[
+                "dir1/test1.gitlab-ci.yml",
+                "dir1/subdir/test2.gitlab-ci.yml",
+                "dir2/test3.gitlab-ci.yml",
+            ],
+            &["dir1", "dir1/subdir", "dir2"],
+        );
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec!["dir1".to_string(), "dir2".to_string()];
+
+        let mut resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        resolved.sort();
+
+        let mut expected: Vec<PathBuf> = vec![
+            tmp_dir.path().join("dir1/test1.gitlab-ci.yml"),
+            tmp_dir.path().join("dir1/subdir/test2.gitlab-ci.yml"),
+            tmp_dir.path().join("dir2/test3.gitlab-ci.yml"),
+        ];
+        expected.sort();
+
+        assert_eq!(resolved.len(), 3);
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn test_resolve_root_files_glob_pattern() {
+        let tmp_dir = setup_test_environment(
+            &[
+                "file_a.gitlab-ci.yml",
+                "file_b.gitlab-ci.yml",
+                "other_file.txt",
+            ],
+            &[],
+        );
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec!["file_*.gitlab-ci.yml".to_string()];
+
+        let mut resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        resolved.sort();
+
+        let mut expected: Vec<PathBuf> = vec![
+            tmp_dir.path().join("file_a.gitlab-ci.yml"),
+            tmp_dir.path().join("file_b.gitlab-ci.yml"),
+        ];
+        expected.sort();
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn test_resolve_root_files_mixed_input() {
+        let tmp_dir = setup_test_environment(
+            &[
+                "file1.gitlab-ci.yml",
+                "dir_mix/file2.gitlab-ci.yml",
+                "dir_mix/subdir_mix/file3.gitlab-ci.yml",
+                "glob_a.gitlab-ci.yml",
+                "glob_b.gitlab-ci.yml",
+                "another_file.txt",
+            ],
+            &["dir_mix", "dir_mix/subdir_mix"],
+        );
+        let project_root_url = Url::from_directory_path(tmp_dir.path()).unwrap();
+        let files = vec![
+            "file1.gitlab-ci.yml".to_string(),
+            "dir_mix".to_string(),
+            "glob_*.gitlab-ci.yml".to_string(),
+            "non_existent.gitlab-ci.yml".to_string(), // Should be ignored
+        ];
+
+        let mut resolved = LSPHandlers::resolve_root_files(files, &project_root_url);
+        resolved.sort();
+
+        let mut expected: Vec<PathBuf> = vec![
+            tmp_dir.path().join("file1.gitlab-ci.yml"),
+            tmp_dir.path().join("dir_mix/file2.gitlab-ci.yml"),
+            tmp_dir
+                .path()
+                .join("dir_mix/subdir_mix/file3.gitlab-ci.yml"),
+            tmp_dir.path().join("glob_a.gitlab-ci.yml"),
+            tmp_dir.path().join("glob_b.gitlab-ci.yml"),
+        ];
+        expected.sort();
+
+        assert_eq!(resolved.len(), 5);
+        assert_eq!(resolved, expected);
+    }
+}
+

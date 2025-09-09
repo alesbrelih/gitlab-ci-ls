@@ -37,6 +37,31 @@ Initialization options:
 - **options**:
   - **dependencies_autocomplete_stage_filtering**: Items in dependencies options has to be from previous or current stage. This opption enables dependencies autocomplete result filtering by job stages. It is currently set as opt-in because it takes a longer time (cca 800ms on test repo - medium size) when stages aren't defined in root job because language server needs to first build whole job definition (merging extends) before it can check if job is a valid one. Defaults to `false`
 
+## Project-level Configuration (`.gitlab-ci-ls.yml`)
+
+For projects that do not have a standard `.gitlab-ci.yml` file at their root (e.g., GitLab CI template projects that define reusable components without a pipeline of their own), you can specify the root CI files using a `.gitlab-ci-ls.yml` file in your project's root directory. This allows the language server to correctly identify and process your GitLab CI configurations.
+
+The `.gitlab-ci-ls.yml` file should contain a `root_files` key, which is a list of paths to your main GitLab CI files. These paths can be:
+
+-   **Individual files**: Direct paths to `.gitlab-ci.yml` or `.gitlab-ci.yaml` files.
+    Example: `["path/to/my-pipeline.gitlab-ci.yml"]`
+-   **Directories**: The language server will recursively search for `.gitlab-ci.yml` or `.gitlab-ci.yaml` files within the specified directories.
+    Example: `["pipelines/"]`
+-   **Glob patterns**: Patterns that match multiple GitLab CI files.
+    Example: `["templates/**/*.gitlab-ci.yml"]`
+
+You can combine these types in a single list to cover all your root CI files.
+
+**Example `.gitlab-ci-ls.yml`:**
+
+```yaml
+root_files:
+  - pipeline1/.gitlab-ci.yml
+  - pipeline2/.gitlab-ci.yml
+  - shared-templates/**/*.gitlab-ci.yml
+  - ci-configs/
+```
+
 ## Installation
 
 **Hint:** On Linux you have to install the package `libssl-dev` (On Debian based distributions) respectively `openssl-devel` (On RedHat based distributions) when you use Cargo or Mason installation.
