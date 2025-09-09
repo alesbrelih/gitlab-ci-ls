@@ -20,8 +20,7 @@ impl ParserUtils {
         s.char_indices()
             .take_while(|(i, _)| *i <= byte_index)
             .last()
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+            .map_or(0, |(i, _)| i)
     }
 
     pub fn strip_quotes(value: &str) -> &str {
@@ -123,7 +122,10 @@ impl ParserUtils {
         }
 
         let adjusted_pos = Self::adjust_to_char_boundary(line, cursor_pos);
-        let char_cursor = line.char_indices().take_while(|(i, _)| *i < adjusted_pos).count();
+        let char_cursor = line
+            .char_indices()
+            .take_while(|(i, _)| *i < adjusted_pos)
+            .count();
 
         let mut current_component = String::new();
         let mut previous_components = String::new();
