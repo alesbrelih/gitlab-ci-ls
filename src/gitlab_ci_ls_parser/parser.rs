@@ -10,8 +10,8 @@ use lsp_types::{Position, Url};
 use super::{
     fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
     GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
-    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode,
-    NodeDefinition, ParseResults, RuleReference,
+    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, NodeDefinition,
+    ParseResults, RuleReference,
 };
 
 unsafe impl Sync for ParserImpl {}
