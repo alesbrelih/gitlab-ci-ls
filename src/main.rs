@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::Parser;
 use gitlab_ci_ls_parser::LSPExperimental;
-use log::{error, info, warn, LevelFilter};
+use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::result::Result::Ok;

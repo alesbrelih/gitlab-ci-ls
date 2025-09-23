@@ -17,6 +17,9 @@ pub struct ComponentInfo {
 
 impl ParserUtils {
     fn adjust_to_char_boundary(s: &str, byte_index: usize) -> usize {
+        if byte_index == s.len() {
+            return s.len();
+        }
         s.char_indices()
             .take_while(|(i, _)| *i <= byte_index)
             .last()
@@ -381,5 +384,15 @@ mod tests {
         let result = ParserUtils::extract_word(line, char_index);
         // This should work with the fix
         assert_eq!(result, Some("🚀"));
+    }
+
+    #[test]
+    fn test_adjust_to_char_boundary() {
+        let line = "  extends: .";
+        let char_idx = 12;
+
+        let adjusted = ParserUtils::adjust_to_char_boundary(line, char_idx);
+
+        assert_eq!(adjusted, char_idx);
     }
 }

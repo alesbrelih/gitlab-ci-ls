@@ -4,13 +4,13 @@ use std::{
 };
 
 use anyhow::anyhow;
-use log::{error, info, warn};
+use log::{error, info};
 use lsp_types::{Position, Url};
 
 use super::{
     fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
     GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
-    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, LSPConfig,
+    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode,
     NodeDefinition, ParseResults, RuleReference,
 };
 
