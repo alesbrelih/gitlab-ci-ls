@@ -1004,7 +1004,7 @@ impl LSPHandlers {
 
         let after =
             parser_utils::ParserUtils::word_after_cursor(line, position.character as usize, |c| {
-                c.is_whitespace()
+                c.is_whitespace() || c == '"' || c == '\''
             });
 
         let items = variables
