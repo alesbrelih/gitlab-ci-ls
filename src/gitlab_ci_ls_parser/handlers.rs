@@ -130,7 +130,7 @@ impl LSPHandlers {
                                 GitlabElement {
                                     key: key.clone(),
                                     content: element.content.clone(),
-                                    uri: document_uri.to_string(),
+                                    uri: document_uri.clone(),
                                     ..Default::default()
                                 },
                                 &node_list,
@@ -185,7 +185,7 @@ impl LSPHandlers {
                                 GitlabElement {
                                     key: key.clone(),
                                     content: element.content.clone(),
-                                    uri: document_uri.to_string(),
+                                    uri: document_uri.clone(),
                                     ..Default::default()
                                 },
                                 &node_list,
@@ -218,7 +218,7 @@ impl LSPHandlers {
                                 GitlabElement {
                                     key: key.clone(),
                                     content: element.content.clone(),
-                                    uri: document_uri.to_string(),
+                                    uri: document_uri.clone(),
                                     ..Default::default()
                                 },
                                 &node_list,
@@ -788,7 +788,7 @@ impl LSPHandlers {
             .filter(|stage| stage.contains(word))
             .flat_map(|stage| -> anyhow::Result<LSPCompletion> {
                 Ok(LSPCompletion {
-                    label: stage.to_string(),
+                    label: stage.clone(),
                     details: None,
                     location: LSPLocation {
                         range: Range {
@@ -959,7 +959,7 @@ impl LSPHandlers {
             .filter(|(node_key, _)| node_key.starts_with('.') && node_key.contains(word))
             .flat_map(|(node_key, element)| -> anyhow::Result<LSPCompletion> {
                 Ok(LSPCompletion {
-                    label: node_key.to_string(),
+                    label: node_key.clone(),
                     details: Some(format!(
                         "```yaml\r\n{}\r\n```",
                         element.clone().content.unwrap_or(String::new())
@@ -1353,7 +1353,7 @@ impl LSPHandlers {
         let store = self.store.lock().unwrap();
         let all_nodes = self.nodes.lock().unwrap();
 
-        let content: String = store.get(&document_uri.to_string())?.to_string();
+        let content: String = store.get(&document_uri.to_string())?.clone();
 
         let extends = self
             .parser
@@ -1574,7 +1574,7 @@ impl LSPHandlers {
                 for (uri, content) in store.iter() {
                     let mut extends =
                         self.parser
-                            .get_all_extends(uri.to_string(), content.as_str(), Some(word));
+                            .get_all_extends(uri.clone(), content.as_str(), Some(word));
                     references.append(&mut extends);
                 }
             }
@@ -1586,17 +1586,15 @@ impl LSPHandlers {
                 // currently support only those that are extends
                 if word.starts_with('.') {
                     for (uri, content) in store.iter() {
-                        let mut extends = self.parser.get_all_extends(
-                            uri.to_string(),
-                            content.as_str(),
-                            Some(word),
-                        );
+                        let mut extends =
+                            self.parser
+                                .get_all_extends(uri.clone(), content.as_str(), Some(word));
                         references.append(&mut extends);
                     }
                 } else {
                     for (uri, content) in store.iter() {
                         let mut extends = self.parser.get_all_job_needs(
-                            uri.to_string(),
+                            uri.clone(),
                             content.as_str(),
                             Some(word),
                         );
@@ -1722,7 +1720,7 @@ impl LSPHandlers {
                         .filter(|option| option.contains(word))
                         .flat_map(|option| -> anyhow::Result<LSPCompletion> {
                             Ok(LSPCompletion {
-                                label: option.to_string(),
+                                label: option.clone(),
                                 details: None,
                                 location: LSPLocation {
                                     range: Range {

@@ -237,7 +237,7 @@ impl ParserUtils {
         }
 
         Ok(ComponentInfo {
-            host: host.to_string(),
+            host: host.clone(),
             component: component_identificator[0].to_string(),
             project: component_parts.join("/"),
             version: component_identificator[1].to_string(),

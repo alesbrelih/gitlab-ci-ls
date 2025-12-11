@@ -189,7 +189,7 @@ impl Git for GitImpl {
         }
 
         let remotes = match self.package_map.get(remote_pkg) {
-            Some(host) => vec![host.to_string()],
+            Some(host) => vec![host.clone()],
             None => self.remote_urls.clone(),
         };
 
