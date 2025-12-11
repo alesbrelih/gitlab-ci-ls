@@ -39,7 +39,7 @@ export function activate(context: ExtensionContext) {
     initializationOptions: {
       cache: config.get("cachePath"),
       log_path: config.get("logPath"),
-      package_map: config.get("packageMap"),
+      package_map: config.get("packageMap")
     },
   };
 
@@ -54,7 +54,9 @@ export function activate(context: ExtensionContext) {
   // Start the client. This will also launch the server
   client.start();
 
-  checkUpdates(context, config.get("executablePath"));
+  if (config.get("checkForUpdates")) {
+    checkUpdates(context, config.get("executablePath"));
+  }
 }
 
 async function checkUpdates(

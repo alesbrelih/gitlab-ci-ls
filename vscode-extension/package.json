@@ -3,7 +3,7 @@
   "description": "Gitlab CI Language Server",
   "author": "Ales Brelih",
   "license": "MIT",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "repository": {
     "type": "git",
     "url": "https://github.com/alesbrelih/gitlab-ci-ls"
@@ -13,7 +13,7 @@
   "keywords": [
     "gitlab language server"
   ],
-  "icon": "./gitlab-ci-ls.png",
+  "icon": "gitlab-ci-ls.png",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -45,6 +45,11 @@
           "type": "string",
           "default": "~/.cache/gitlab-ci-ls/log/gitlab-ci-ls.log",
           "description": "Log path for the LS."
+        },
+        "gitlabLs.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when a new version of Gitlab CI LS is released."
         }
       }
     }
