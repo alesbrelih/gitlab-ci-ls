@@ -9,7 +9,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4.28"
+log = "0.4.29"
 streaming-iterator = "0.1.9"
 lsp-server = "0.7.9"
 lsp-types = "0.95.1"
