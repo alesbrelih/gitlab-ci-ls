@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Instant};
+use std::{collections::HashMap, fs, path::PathBuf, sync::{Arc, Mutex}, time::Instant};
 
 use anyhow::anyhow;
 use log::{debug, error, info, warn};
@@ -11,7 +11,7 @@ use lsp_types::{
 use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
-    parser_utils::ParserUtils, DiagnosticsNotification, LspConfiguration, NodeDefinition,
+    parser_utils::ParserUtils, workspace::{Workspace, IndexingState}, DiagnosticsNotification, LspConfiguration, NodeDefinition,
     PrepareRenameResult, RenameResult, DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
 };
 
@@ -27,45 +27,17 @@ use super::{
 #[allow(clippy::module_name_repetitions)]
 pub struct LSPHandlers {
     cfg: LSPConfig,
-    store: Mutex<HashMap<String, String>>,
-    nodes: Mutex<HashMap<String, HashMap<String, GitlabElement>>>,
-    // ordered list by imports -> meaning it starts at root element and parses from top down as
-    // parser would do
-    // Also added a new wrapper so all jobs are separated by file in which they are located
-    // This was done so we can still keep the order but elements are inside file objects so
-    // when on_change occurs we can just wipe jobs inside that file structure.
-    // else we wouldn't know if elements were deleted or changed and there would be more code
-    nodes_ordered_list: Mutex<Vec<GitlabFileElements>>,
-    stages: Mutex<HashMap<String, GitlabElement>>,
-    // Need ordered list of stages so I can autocomplete better.
-    // For example depencency keyword can only take jobs in previous or same stage before yaml
-    // becomes invalid
-    stages_ordered_list: Mutex<Vec<String>>,
-    variables: Mutex<HashMap<String, GitlabElement>>,
-    components: Mutex<HashMap<String, Component>>,
-    indexing_in_progress: Mutex<bool>,
+    workspaces: Mutex<Vec<Arc<Workspace>>>,
     parser: Box<dyn parser::Parser>,
 }
 
 impl LSPHandlers {
     pub fn new(cfg: LSPConfig, fs_utils: Box<dyn fs_utils::FSUtils>) -> LSPHandlers {
-        let store = Mutex::new(HashMap::new());
-        let nodes = Mutex::new(HashMap::new());
-        let stages = Mutex::new(HashMap::new());
-        let variables = Mutex::new(HashMap::new());
-        let components = Mutex::new(HashMap::new());
-        let indexing_in_progress = Mutex::new(false);
+        let workspaces = Mutex::new(vec![]);
 
         let events = LSPHandlers {
             cfg: cfg.clone(),
-            store,
-            nodes,
-            nodes_ordered_list: vec![].into(),
-            stages_ordered_list: vec![].into(),
-            stages,
-            variables,
-            components,
-            indexing_in_progress,
+            workspaces,
             parser: Box::new(parser::ParserImpl::new(
                 cfg.remote_urls,
                 cfg.package_map,
@@ -79,11 +51,16 @@ impl LSPHandlers {
             error!("error indexing workspace; err: {err}");
         }
 
-        //if let Err(err) = events.build_all_nodes(cfg.clone()) {
-        //    error!("error building all nodes; err: {}", err)
-        //}
-
         events
+    }
+
+    fn get_workspace_for_uri(&self, uri: &str) -> Option<Arc<Workspace>> {
+        let workspaces = self.workspaces.lock().unwrap();
+        workspaces
+            .iter()
+            .find(|w| w.files_included.lock().unwrap().contains(uri))
+            .cloned()
+            .or_else(|| workspaces.first().cloned())
     }
 
     fn default_stages() -> Vec<String> {
@@ -107,12 +84,14 @@ impl LSPHandlers {
     #[allow(clippy::too_many_lines)]
     pub fn on_hover(&self, request: Request) -> Option<LSPResult> {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
-
-        let store = self.store.lock().unwrap();
-        let node_list = self.nodes_ordered_list.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap();
-
         let uri = &params.text_document_position_params.text_document.uri;
+
+        let workspace = self.get_workspace_for_uri(uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
+        let node_list = workspace.nodes_ordered_list.lock().unwrap();
+        let nodes = workspace.nodes.lock().unwrap();
+
         let document = store.get::<String>(&uri.to_string())?;
 
         let position = params.text_document_position_params.position;
@@ -250,27 +229,20 @@ impl LSPHandlers {
             return None;
         }
 
-        // TODO: nodes
+        let workspace = self.get_workspace_for_uri(params.text_document.uri.as_str())?;
 
-        let mut store = self.store.lock().unwrap();
-        let mut all_nodes = self.nodes.lock().unwrap();
-        let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
-        let mut all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
+        let mut store = workspace.store.lock().unwrap();
+        let mut all_nodes = workspace.nodes.lock().unwrap();
+        let mut all_nodes_ordered_list = workspace.nodes_ordered_list.lock().unwrap();
+        let mut all_stages_ordered_list = workspace.stages_ordered_list.lock().unwrap();
         // reset previous
         all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
-        let mut all_variables = self.variables.lock().unwrap();
+        let mut all_variables = workspace.variables.lock().unwrap();
 
-        let mut all_components = self.components.lock().unwrap();
+        let mut all_components = workspace.components.lock().unwrap();
 
-        let root_u = format!("file://{}", &self.cfg.root_dir);
-        let u = match Url::parse(&root_u) {
-            Ok(res) => res,
-            Err(err) => {
-                warn!("err: {err}");
-                return None;
-            }
-        };
+        let u = workspace.root_uri.clone();
 
         if let Some(results) = self.parser.parse_contents(
             &params.text_document.uri,
@@ -279,6 +251,7 @@ impl LSPHandlers {
             false,
         ) {
             for file in results.files {
+                workspace.files_included.lock().unwrap().insert(file.path.clone());
                 store.insert(file.path, file.content);
             }
 
@@ -303,7 +276,7 @@ impl LSPHandlers {
             }
 
             if !results.stages.is_empty() {
-                let mut all_stages = self.stages.lock().unwrap();
+                let mut all_stages = workspace.stages.lock().unwrap();
                 all_stages.clear();
 
                 for stage in &results.stages {
@@ -339,24 +312,19 @@ impl LSPHandlers {
     }
 
     pub fn on_open(&self, notification: Notification) -> Option<LSPResult> {
-        let in_progress = self.indexing_in_progress.lock().unwrap();
-        drop(in_progress);
-
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
 
-        let mut store = self.store.lock().unwrap();
-        let mut all_nodes = self.nodes.lock().unwrap();
-        let mut all_stages = self.stages.lock().unwrap();
+        let workspace = self.get_workspace_for_uri(params.text_document.uri.as_str())?;
 
-        let root_u = format!("file://{}", &self.cfg.root_dir);
-        let u = match Url::parse(&root_u) {
-            Ok(res) => res,
-            Err(err) => {
-                warn!("err: {err}");
-                return None;
-            }
-        };
+        let in_progress = workspace.indexing_state.lock().unwrap();
+        drop(in_progress);
+
+        let mut store = workspace.store.lock().unwrap();
+        let mut all_nodes = workspace.nodes.lock().unwrap();
+        let mut all_stages = workspace.stages.lock().unwrap();
+
+        let u = workspace.root_uri.clone();
 
         if let Some(results) = self.parser.parse_contents(
             &params.text_document.uri,
@@ -365,6 +333,7 @@ impl LSPHandlers {
             true,
         ) {
             for file in results.files {
+                workspace.files_included.lock().unwrap().insert(file.path.clone());
                 store.insert(file.path, file.content);
             }
 
@@ -397,14 +366,16 @@ impl LSPHandlers {
     #[allow(clippy::too_many_lines)]
     pub fn on_definition(&self, request: Request) -> Option<LSPResult> {
         let params = serde_json::from_value::<GotoTypeDefinitionParams>(request.params).ok()?;
-
-        let store = self.store.lock().unwrap();
-        let store = &*store;
-        let node_list = self.nodes_ordered_list.lock().unwrap();
         let document_uri = params.text_document_position_params.text_document.uri;
+
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
+        let store = &*store;
+        let node_list = workspace.nodes_ordered_list.lock().unwrap();
         let document = store.get::<String>(&document_uri.to_string())?;
         let position = params.text_document_position_params.position;
-        let stages = self.stages.lock().unwrap();
+        let stages = workspace.stages.lock().unwrap();
 
         let mut locations: Vec<LSPLocation> = vec![];
 
@@ -433,7 +404,7 @@ impl LSPHandlers {
                 }
             }
             parser::PositionType::Include(info) => {
-                if let Some(include) = self.on_definition_include(info, store) {
+                if let Some(include) = self.on_definition_include(&workspace, info, store) {
                     locations.push(include);
                 }
             }
@@ -509,7 +480,7 @@ impl LSPHandlers {
                         range: location.range,
                     });
                 }
-                let mut root = self
+                let mut root = workspace
                     .variables
                     .lock()
                     .unwrap()
@@ -548,6 +519,7 @@ impl LSPHandlers {
     #[allow(clippy::too_many_lines)]
     fn on_definition_include(
         &self,
+        workspace: &Workspace,
         info: IncludeInformation,
         store: &HashMap<String, String>,
     ) -> Option<LSPLocation> {
@@ -609,7 +581,7 @@ impl LSPHandlers {
                     .trim_matches('\'')
                     .to_string();
 
-                self.components
+                workspace.components
                     .lock()
                     .unwrap()
                     .values()
@@ -707,22 +679,38 @@ impl LSPHandlers {
     pub fn on_completion(&self, request: Request) -> Option<LSPResult> {
         let start = Instant::now();
         let params: CompletionParams = serde_json::from_value(request.params).ok()?;
-
-        let store = self.store.lock().unwrap();
         let document_uri = params.text_document_position.text_document.uri;
+
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
         let document = store.get::<String>(&document_uri.clone().into())?;
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
         let items = match self.parser.get_position_type(document, position) {
-            parser::PositionType::Stage => self.on_completion_stages(line, position).ok()?,
+            parser::PositionType::Stage => {
+                self.on_completion_stages(&workspace, line, position).ok()?
+            }
             parser::PositionType::Dependency => self
-                .on_completion_dependencies(document_uri.as_ref(), document, line, position)
+                .on_completion_dependencies(
+                    &workspace,
+                    document_uri.as_ref(),
+                    document,
+                    line,
+                    position,
+                )
                 .ok()?,
-            parser::PositionType::Extend => self.on_completion_extends(line, position).ok()?,
-            parser::PositionType::Variable => self.on_completion_variables(line, position).ok()?,
-            parser::PositionType::Needs(_) => self.on_completion_needs(line, position).ok()?,
+            parser::PositionType::Extend => {
+                self.on_completion_extends(&workspace, line, position).ok()?
+            }
+            parser::PositionType::Variable => {
+                self.on_completion_variables(&workspace, line, position).ok()?
+            }
+            parser::PositionType::Needs(_) => {
+                self.on_completion_needs(&workspace, line, position).ok()?
+            }
             parser::PositionType::Include(IncludeInformation {
                 remote: None,
                 remote_url: None,
@@ -730,7 +718,7 @@ impl LSPHandlers {
                 basic: None,
                 component: Some(component),
             }) => self
-                .on_completion_component(line, position, &component)
+                .on_completion_component(&workspace, line, position, &component)
                 .ok()?,
             parser::PositionType::Include(IncludeInformation {
                 remote: Some(remote),
@@ -738,9 +726,11 @@ impl LSPHandlers {
                 local: None,
                 basic: None,
                 component: None,
-            }) => self.on_completion_remote(line, position, &remote).ok()?,
+            }) => self
+                .on_completion_remote(&workspace, line, position, &remote)
+                .ok()?,
             parser::PositionType::RuleReference(_) => {
-                self.on_completion_rule_reference(line, position).ok()?
+                self.on_completion_rule_reference(&workspace, line, position).ok()?
             }
             _ => return None,
         };
@@ -755,11 +745,12 @@ impl LSPHandlers {
 
     fn on_completion_stages(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
         let stages = {
-            let locked_stages = self
+            let locked_stages = workspace
                 .stages
                 .lock()
                 .map_err(|e| anyhow::anyhow!("failed to lock stages: {}", e))?;
@@ -812,6 +803,7 @@ impl LSPHandlers {
 
     fn on_completion_dependencies(
         &self,
+        workspace: &Workspace,
         uri: &str,
         document: &str,
         line: &str,
@@ -819,7 +811,7 @@ impl LSPHandlers {
     ) -> anyhow::Result<Vec<LSPCompletion>> {
         let start = Instant::now();
 
-        let nodes = self
+        let nodes = workspace
             .nodes
             .lock()
             .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
@@ -836,8 +828,8 @@ impl LSPHandlers {
             });
 
         // autocomplete filtering by stage; experimental opt infeature due to longer responses ATM
-        let all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
-        let all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
+        let all_nodes_ordered_list = workspace.nodes_ordered_list.lock().unwrap();
+        let all_stages_ordered_list = workspace.stages_ordered_list.lock().unwrap();
         let mut previous_stages = HashMap::new();
 
         if self
@@ -933,10 +925,11 @@ impl LSPHandlers {
 
     fn on_completion_extends(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        let nodes = self
+        let nodes = workspace
             .nodes
             .lock()
             .map_err(|e| anyhow!("failed to lock nodes: {}", e))?;
@@ -988,10 +981,11 @@ impl LSPHandlers {
 
     fn on_completion_variables(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        let variables = self
+        let variables = workspace
             .variables
             .lock()
             .map_err(|e| anyhow!("failed to lock variables: {}", e))?;
@@ -1036,10 +1030,11 @@ impl LSPHandlers {
 
     fn on_completion_rule_reference(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        let nodes = self
+        let nodes = workspace
             .nodes
             .lock()
             .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
@@ -1088,10 +1083,11 @@ impl LSPHandlers {
 
     fn on_completion_needs(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
     ) -> anyhow::Result<Vec<LSPCompletion>> {
-        let nodes = self
+        let nodes = workspace
             .nodes
             .lock()
             .map_err(|err| anyhow!("failed to lock nodes: {}", err))?;
@@ -1177,64 +1173,11 @@ impl LSPHandlers {
 
     #[allow(clippy::too_many_lines)]
     fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
-        let mut in_progress = self.indexing_in_progress.lock().unwrap();
-        *in_progress = true;
-
         let start = Instant::now();
-
-        let mut store = self.store.lock().unwrap();
-        let mut all_nodes = self.nodes.lock().unwrap();
-        let mut all_nodes_ordered_list = self.nodes_ordered_list.lock().unwrap();
-        let mut all_stages_ordered_list = self.stages_ordered_list.lock().unwrap();
-        let mut all_stages = self.stages.lock().unwrap();
-        let mut all_variables = self.variables.lock().unwrap();
-        let mut all_components = self.components.lock().unwrap();
 
         info!("importing from root file");
         let project_root_dir = Url::parse(format!("file://{root_dir}/").as_str())?;
         info!("uri: {}", &project_root_dir);
-
-        info!("importing files from base");
-        let base_uri = format!("{}base", self.cfg.cache_path);
-        let base_uri_path = Url::parse(format!("file://{base_uri}/").as_str())?;
-        for dir in std::fs::read_dir(&base_uri)?.flatten() {
-            let file_uri = base_uri_path.join(dir.file_name().to_str().unwrap())?;
-            let file_content = std::fs::read_to_string(dir.path())?;
-
-            if let Some(results) =
-                self.parser
-                    .parse_contents(&file_uri, &file_content, &project_root_dir, true)
-            {
-                for file in results.files {
-                    info!("found file: {:?}", &file);
-                    store.insert(file.path, file.content);
-                }
-
-                for node in results.nodes {
-                    info!("found node: {:?}", &node);
-
-                    all_nodes
-                        .entry(node.uri.clone())
-                        .or_default()
-                        .insert(node.key.clone(), node);
-                }
-
-                for stage in results.stages {
-                    info!("found stage: {:?}", &stage);
-                    all_stages.insert(stage.key.clone(), stage);
-                }
-
-                for variable in results.variables {
-                    info!("found variable: {:?}", &variable);
-                    all_variables.insert(variable.key.clone(), variable);
-                }
-
-                for component in results.components {
-                    info!("found component: {:?}", &component);
-                    all_components.insert(component.uri.clone(), component);
-                }
-            }
-        }
 
         let list = std::fs::read_dir(root_dir)?;
         let mut root_files: Vec<PathBuf> = vec![];
@@ -1272,13 +1215,17 @@ impl LSPHandlers {
         for root_file in root_files {
             let root_file_content = std::fs::read_to_string(&root_file)?;
 
-            let file = {
+            let file_uri = {
                 let Some(root_file_str) = root_file.to_str() else {
                     // continue to next root file if its there
                     continue;
                 };
 
-                let root_file_str_with_schema = format!("file://{root_file_str}");
+                let root_file_str_with_schema = if root_file_str.starts_with('/') {
+                    format!("file://{root_file_str}")
+                } else {
+                    root_file_str.to_string()
+                };
                 match Url::parse(&root_file_str_with_schema) {
                     Ok(u) => u,
                     Err(err) => {
@@ -1288,12 +1235,77 @@ impl LSPHandlers {
                 }
             };
 
+            let workspace = Arc::new(Workspace::new(file_uri.clone()));
+            {
+                let mut ws_list = self.workspaces.lock().unwrap();
+                ws_list.push(workspace.clone());
+            }
+
+            {
+                let mut in_progress = workspace.indexing_state.lock().unwrap();
+                *in_progress = IndexingState::InProgress;
+            }
+
+            let mut store = workspace.store.lock().unwrap();
+            let mut all_nodes = workspace.nodes.lock().unwrap();
+            let mut all_nodes_ordered_list = workspace.nodes_ordered_list.lock().unwrap();
+            let mut all_stages_ordered_list = workspace.stages_ordered_list.lock().unwrap();
+            let mut all_stages = workspace.stages.lock().unwrap();
+            let mut all_variables = workspace.variables.lock().unwrap();
+            let mut all_components = workspace.components.lock().unwrap();
+
+            info!("importing files from base");
+            let base_uri = format!("{}base", self.cfg.cache_path);
+            let base_uri_path = Url::parse(format!("file://{base_uri}/").as_str())?;
+            if let Ok(read_dir) = std::fs::read_dir(&base_uri) {
+                for dir in read_dir.flatten() {
+                    let file_uri = base_uri_path.join(dir.file_name().to_str().unwrap())?;
+                    let file_content = std::fs::read_to_string(dir.path())?;
+
+                    if let Some(results) =
+                        self.parser
+                            .parse_contents(&file_uri, &file_content, &project_root_dir, true)
+                    {
+                        for file in results.files {
+                            info!("found file: {:?}", &file);
+                            workspace.files_included.lock().unwrap().insert(file.path.clone());
+                            store.insert(file.path, file.content);
+                        }
+
+                        for node in results.nodes {
+                            info!("found node: {:?}", &node);
+
+                            all_nodes
+                                .entry(node.uri.clone())
+                                .or_default()
+                                .insert(node.key.clone(), node);
+                        }
+
+                        for stage in results.stages {
+                            info!("found stage: {:?}", &stage);
+                            all_stages.insert(stage.key.clone(), stage);
+                        }
+
+                        for variable in results.variables {
+                            info!("found variable: {:?}", &variable);
+                            all_variables.insert(variable.key.clone(), variable);
+                        }
+
+                        for component in results.components {
+                            info!("found component: {:?}", &component);
+                            all_components.insert(component.uri.clone(), component);
+                        }
+                    }
+                }
+            }
+
             if let Some(results) =
                 self.parser
-                    .parse_contents(&file, &root_file_content, &project_root_dir, true)
+                    .parse_contents(&file_uri, &root_file_content, &project_root_dir, true)
             {
                 for file in results.files {
                     info!("found file: {:?}", &file);
+                    workspace.files_included.lock().unwrap().insert(file.path.clone());
                     store.insert(file.path, file.content);
                 }
 
@@ -1340,6 +1352,11 @@ impl LSPHandlers {
                     all_components.insert(component.uri.clone(), component);
                 }
             }
+
+            {
+                let mut in_progress = workspace.indexing_state.lock().unwrap();
+                *in_progress = IndexingState::Completed;
+            }
         }
 
         info!("INDEX WORKSPACE ELAPSED: {:?}", start.elapsed());
@@ -1350,8 +1367,10 @@ impl LSPHandlers {
     #[allow(clippy::too_many_lines)]
     fn generate_diagnostics(&self, document_uri: lsp_types::Url) -> Option<LSPResult> {
         let start = Instant::now();
-        let store = self.store.lock().unwrap();
-        let all_nodes = self.nodes.lock().unwrap();
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
+        let all_nodes = workspace.nodes.lock().unwrap();
 
         let content: String = store.get(&document_uri.to_string())?.clone();
 
@@ -1390,7 +1409,7 @@ impl LSPHandlers {
             .get_all_stages(document_uri.as_ref(), content.as_str(), None);
 
         let all_stages = {
-            let locked_stages = self.stages.lock().unwrap();
+            let locked_stages = workspace.stages.lock().unwrap();
 
             let keys: Vec<_> = locked_stages.keys().map(ToString::to_string).collect();
 
@@ -1475,7 +1494,7 @@ impl LSPHandlers {
             .parser
             .get_all_components(document_uri.as_ref(), content.as_str());
 
-        let all_components = self.components.lock().unwrap();
+        let all_components = workspace.components.lock().unwrap();
         for component in components {
             if let Some(spec) = all_components.get(&component.key) {
                 component.inputs.iter().for_each(|i| {
@@ -1555,9 +1574,11 @@ impl LSPHandlers {
         let start = Instant::now();
 
         let params = serde_json::from_value::<lsp_types::ReferenceParams>(request.params).ok()?;
-
-        let store = self.store.lock().unwrap();
         let document_uri = &params.text_document_position.text_document.uri;
+
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
         let document = store.get::<String>(&document_uri.to_string())?;
 
         let position = params.text_document_position.position;
@@ -1625,6 +1646,7 @@ impl LSPHandlers {
     #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
     fn on_completion_component(
         &self,
+        workspace: &Workspace,
         line: &str,
         position: Position,
         component: &Component,
@@ -1642,7 +1664,7 @@ impl LSPHandlers {
                 |c| c.is_whitespace() || c == ':',
             );
 
-            let components_store = self.components.lock().unwrap();
+            let components_store = workspace.components.lock().unwrap();
             let Some(component_spec) = components_store.get(&component.uri) else {
                 warn!(
                     "could not find component spec; indexing went wrong!; searching for {}",
@@ -1699,7 +1721,7 @@ impl LSPHandlers {
                 |c: char| c.is_whitespace(),
             );
 
-            let components_store = self.components.lock().unwrap();
+            let components_store = workspace.components.lock().unwrap();
             let Some(component_spec) = components_store.get(&component.uri) else {
                 warn!(
                     "could not find component spec; indexing went wrong!; searching for {}",
@@ -1754,7 +1776,6 @@ impl LSPHandlers {
         let start = Instant::now();
         let params: TextDocumentPositionParams = serde_json::from_value(request.params).ok()?;
 
-        let store = self.store.lock().unwrap();
         let document_uri = params.text_document.uri;
 
         if !self.can_path_be_modified(document_uri.as_ref()) {
@@ -1765,6 +1786,9 @@ impl LSPHandlers {
             }));
         }
 
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
         let document = store.get::<String>(&document_uri.clone().into())?;
 
         let position = params.position;
@@ -1872,7 +1896,6 @@ impl LSPHandlers {
 
         info!("got rename params: {params:?}");
 
-        let store = self.store.lock().unwrap();
         let document_uri = params.text_document_position.text_document.uri;
 
         // This is redundant but I guess could be needed for when prepare_rename isn't supported
@@ -1885,6 +1908,9 @@ impl LSPHandlers {
             }));
         }
 
+        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+
+        let store = workspace.store.lock().unwrap();
         let document = store.get::<String>(&document_uri.clone().into())?;
 
         let position = params.text_document_position.position;
@@ -2163,6 +2189,7 @@ impl LSPHandlers {
 
     fn on_completion_remote(
         &self,
+        _workspace: &Workspace,
         line: &str,
         position: Position,
         remote: &RemoteInclude,

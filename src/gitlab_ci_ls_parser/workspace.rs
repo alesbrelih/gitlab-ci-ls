@@ -1,26 +1,34 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 use lsp_types::Url;
 
-use super::ParseResults;
+use super::{GitlabElement, GitlabFileElements, Component};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WorkspaceId(pub String);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexingState {
     New,
     InProgress,
     Completed,
-    Failed(String),
+    Failed,
 }
 
 #[derive(Debug)]
 pub struct Workspace {
     pub id: WorkspaceId,
     pub root_uri: Url,
-    pub files_included: HashSet<Url>,
-    pub parsed_data: Option<ParseResults>,
-    pub indexing_state: IndexingState,
+    pub files_included: Mutex<HashSet<String>>,
+    pub indexing_state: Mutex<IndexingState>,
+
+    pub store: Mutex<HashMap<String, String>>,
+    pub nodes: Mutex<HashMap<String, HashMap<String, GitlabElement>>>,
+    pub nodes_ordered_list: Mutex<Vec<GitlabFileElements>>,
+    pub stages: Mutex<HashMap<String, GitlabElement>>,
+    pub stages_ordered_list: Mutex<Vec<String>>,
+    pub variables: Mutex<HashMap<String, GitlabElement>>,
+    pub components: Mutex<HashMap<String, Component>>,
 }
 
 impl Workspace {
@@ -29,9 +37,15 @@ impl Workspace {
         Workspace {
             id,
             root_uri,
-            files_included: HashSet::new(),
-            parsed_data: None,
-            indexing_state: IndexingState::New,
+            files_included: Mutex::new(HashSet::new()),
+            indexing_state: Mutex::new(IndexingState::New),
+            store: Mutex::new(HashMap::new()),
+            nodes: Mutex::new(HashMap::new()),
+            nodes_ordered_list: Mutex::new(Vec::new()),
+            stages: Mutex::new(HashMap::new()),
+            stages_ordered_list: Mutex::new(Vec::new()),
+            variables: Mutex::new(HashMap::new()),
+            components: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -47,11 +61,14 @@ mod tests {
 
         assert_eq!(workspace.id, WorkspaceId(root_uri.as_str().to_string()));
         assert_eq!(workspace.root_uri, root_uri);
-        assert!(workspace.files_included.is_empty());
-        assert!(workspace.parsed_data.is_none());
-        match workspace.indexing_state {
-            IndexingState::New => (),
-            _ => panic!("Expected IndexingState::New"),
-        }
+        assert!(workspace.files_included.lock().unwrap().is_empty());
+        assert_eq!(*workspace.indexing_state.lock().unwrap(), IndexingState::New);
+        assert!(workspace.store.lock().unwrap().is_empty());
+        assert!(workspace.nodes.lock().unwrap().is_empty());
+        assert!(workspace.nodes_ordered_list.lock().unwrap().is_empty());
+        assert!(workspace.stages.lock().unwrap().is_empty());
+        assert!(workspace.stages_ordered_list.lock().unwrap().is_empty());
+        assert!(workspace.variables.lock().unwrap().is_empty());
+        assert!(workspace.components.lock().unwrap().is_empty());
     }
 }
