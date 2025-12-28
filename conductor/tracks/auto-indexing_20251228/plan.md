@@ -22,7 +22,7 @@
     - Implement `find_roots(graph, files) -> Vec<Uri>` using the fingerprint logic for orphans.
 
 ## Phase 3: Integration & Async Indexing
-- [ ] Task: Implement `initialize_workspace`
+- [x] Task: Implement `initialize_workspace` 9fe4197
     - In `LSPHandlers`, add `scan_workspace(root_dir)` method.
     - Use `glob` to find all YAML files.
     - Run the Dependency Graph Builder.
