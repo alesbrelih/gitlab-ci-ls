@@ -1,6 +1,6 @@
 # Implementation Plan - Track: auto-indexing
 
-## Phase 1: Core Data Structures & Refactoring
+## Phase 1: Core Data Structures & Refactoring [checkpoint: e309860]
 - [x] Task: Define `Workspace` and `WorkspaceId` structs e716d43
     - Create new module `src/gitlab_ci_ls_parser/workspace.rs`
     - Define `Workspace` struct with `root_uri`, `files_included`, `parsed_data`, etc.
