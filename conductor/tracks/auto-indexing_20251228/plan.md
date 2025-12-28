@@ -5,7 +5,7 @@
     - Create new module `src/gitlab_ci_ls_parser/workspace.rs`
     - Define `Workspace` struct with `root_uri`, `files_included`, `parsed_data`, etc.
     - Implement `Workspace::new(root_uri)`
-- [ ] Task: Refactor `LSPHandlers` to support Multi-Root
+- [x] Task: Refactor `LSPHandlers` to support Multi-Root ec5a04a
     - Modify `LSPHandlers` struct in `src/gitlab_ci_ls_parser/handlers.rs`
     - Replace single-state fields with `workspaces: Vec<Workspace>` (or `HashMap`)
     - **CRITICAL:** Implement a backward-compatible `get_active_workspace(uri)` helper to allow existing methods to function by returning the best-match workspace or a default one.
