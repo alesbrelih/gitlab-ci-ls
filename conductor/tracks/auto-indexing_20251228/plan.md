@@ -31,7 +31,7 @@
     - Call `scan_workspace` during initialization.
     - Ensure it runs asynchronously (don't block init response).
 
-## Phase 4: Context-Aware Resolution Features
+## Phase 4: Context-Aware Resolution Features [checkpoint: 6b8dc81]
 - [x] Task: Update `get_all_job_needs` / Completion 830559d
     - Update `handlers.rs` to use `find_workspaces_for(uri)` instead of assuming a single root.
     - Aggregate results if multiple workspaces are found.
