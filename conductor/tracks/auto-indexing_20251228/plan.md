@@ -11,7 +11,7 @@
     - **CRITICAL:** Implement a backward-compatible `get_active_workspace(uri)` helper to allow existing methods to function by returning the best-match workspace or a default one.
     - Update `new()` to initialize the empty collection.
 
-## Phase 2: Intelligent Scanning & Fingerprinting
+## Phase 2: Intelligent Scanning & Fingerprinting [checkpoint: 3224c1f]
 - [x] Task: Implement Content Fingerprinting 1d50af9
     - Create `src/gitlab_ci_ls_parser/fingerprint.rs`
     - Implement `is_gitlab_ci_file(content: &str) -> bool`
