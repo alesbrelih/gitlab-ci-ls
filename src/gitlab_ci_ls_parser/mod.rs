@@ -14,6 +14,7 @@ pub mod treesitter;
 pub mod treesitter_queries;
 pub mod workspace;
 pub mod fingerprint;
+pub mod graph;
 
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct LSPPosition {
@@ -318,8 +319,8 @@ struct ComponentSpec {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct IncludeNode {
-    include: Vec<IncludeItem>,
+pub struct IncludeNode {
+    pub include: Vec<IncludeItem>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -342,16 +343,16 @@ pub enum ProjectFile {
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::struct_field_names)]
 pub struct Project {
-    project: String,
+    pub project: String,
 
     #[serde(rename = "ref")]
-    reference: Option<String>,
-    file: ProjectFile,
+    pub reference: Option<String>,
+    pub file: ProjectFile,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Local {
-    local: String,
+    pub local: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,16 +363,16 @@ pub enum InputValue {
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ComponentInclude {
-    component: String,
+    pub component: String,
 
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_inputs")]
-    inputs: Option<HashMap<String, InputValue>>,
+    pub inputs: Option<HashMap<String, InputValue>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Remote {
-    remote: String,
+    pub remote: String,
 }
 
 // Custom deserializer for the `inputs` field
