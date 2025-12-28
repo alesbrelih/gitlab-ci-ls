@@ -35,7 +35,7 @@
 - [x] Task: Update `get_all_job_needs` / Completion 830559d
     - Update `handlers.rs` to use `find_workspaces_for(uri)` instead of assuming a single root.
     - Aggregate results if multiple workspaces are found.
-- [ ] Task: Update "Find References"
+- [x] Task: Update "Find References" 830559d
     - Ensure it queries the reverse index of the correct workspace(s).
 
 ## Phase 5: Verification
