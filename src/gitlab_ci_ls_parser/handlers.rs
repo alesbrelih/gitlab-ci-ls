@@ -35,7 +35,7 @@ impl LSPHandlers {
     pub fn new(cfg: LSPConfig, fs_utils: Box<dyn fs_utils::FSUtils>) -> LSPHandlers {
         let workspaces = Mutex::new(vec![]);
 
-        let events = LSPHandlers {
+        LSPHandlers {
             cfg: cfg.clone(),
             workspaces,
             parser: Box::new(parser::ParserImpl::new(
@@ -45,13 +45,7 @@ impl LSPHandlers {
                 Box::new(treesitter::TreesitterImpl::new()),
                 fs_utils,
             )),
-        };
-
-        if let Err(err) = events.index_workspace(events.cfg.root_dir.as_str()) {
-            error!("error indexing workspace; err: {err}");
         }
-
-        events
     }
 
     fn get_workspace_for_uri(&self, uri: &str) -> Option<Arc<Workspace>> {
@@ -1172,7 +1166,7 @@ impl LSPHandlers {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
+    pub fn index_workspace(&self, root_dir: &str) -> anyhow::Result<()> {
         let start = Instant::now();
 
         info!("importing from root file");

@@ -15,7 +15,7 @@ use mockall::{automock, predicate::str};
 
 #[allow(clippy::ref_option_ref)]
 #[cfg_attr(test, automock)]
-pub trait Treesitter {
+pub trait Treesitter: Send + Sync {
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_root_node_key(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
     fn get_all_root_nodes(&self, uri: &str, content: &str) -> Vec<GitlabElement>;

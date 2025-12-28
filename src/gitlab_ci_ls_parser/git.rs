@@ -15,7 +15,7 @@ use super::{
 use log::{debug, error, info};
 use reqwest::{blocking::Client, header::IF_NONE_MATCH, StatusCode, Url};
 
-pub trait Git {
+pub trait Git: Send + Sync {
     fn clone_repo(&self, repo_dest: &str, remote_tag: Option<&str>, remote_pkg: &str);
     fn fetch_remote_repository(
         &self,

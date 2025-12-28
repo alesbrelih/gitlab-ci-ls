@@ -16,7 +16,7 @@ use super::{
 
 unsafe impl Sync for ParserImpl {}
 
-pub trait Parser: Sync {
+pub trait Parser: Send + Sync {
     fn get_all_extends(
         &self,
         uri: String,

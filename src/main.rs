@@ -17,6 +17,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::process::Command;
+use std::sync::Arc;
 
 use crate::gitlab_ci_ls_parser::fs_utils::{FSUtils, FSUtilsImpl};
 use crate::gitlab_ci_ls_parser::messages;
@@ -204,7 +205,9 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         error!("error saving base files; got err: {err}");
     }
 
-    let lsp_events = gitlab_ci_ls_parser::handlers::LSPHandlers::new(
+    let root_dir = init_params.get_root();
+
+    let lsp_events = Arc::new(gitlab_ci_ls_parser::handlers::LSPHandlers::new(
         gitlab_ci_ls_parser::LSPConfig {
             cache_path: fs_utils
                 .get_path(&init_params.initialization_options.cache_path)
@@ -212,7 +215,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 .to_string(),
             package_map: init_params.initialization_options.package_map.clone(),
             remote_urls,
-            root_dir: init_params.get_root().clone(),
+            root_dir: root_dir.clone(),
             experimental: LSPExperimental {
                 dependencies_autocomplete_stage_filtering: init_params
                     .initialization_options
@@ -221,7 +224,14 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
             },
         },
         Box::new(fs_utils),
-    );
+    ));
+
+    let lsp_events_clone = lsp_events.clone();
+    std::thread::spawn(move || {
+        if let Err(err) = lsp_events_clone.index_workspace(&root_dir) {
+            error!("error indexing workspace; err: {err}");
+        }
+    });
 
     info!("initialized");
 

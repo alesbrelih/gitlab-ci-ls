@@ -1,4 +1,5 @@
 use std::process::exit;
+use std::sync::Arc;
 
 use log::{error, info, warn};
 use lsp_server::{Connection, Message, Response, ResponseError};
@@ -17,11 +18,11 @@ use super::{
 
 pub struct Messages {
     connection: Connection,
-    events: LSPHandlers,
+    events: Arc<LSPHandlers>,
 }
 
 impl Messages {
-    pub fn new(connection: Connection, events: LSPHandlers) -> Self {
+    pub fn new(connection: Connection, events: Arc<LSPHandlers>) -> Self {
         Self { connection, events }
     }
 
