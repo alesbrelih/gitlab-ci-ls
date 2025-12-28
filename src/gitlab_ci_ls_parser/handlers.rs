@@ -16,7 +16,7 @@ use crate::gitlab_ci_ls_parser::{
 };
 
 use super::{
-    fs_utils,
+    fs_utils, graph,
     parser::{self, PositionType},
     parser_utils, treesitter, CompletionResult, Component, ComponentInput, DefinitionResult,
     GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult, IncludeInformation,
@@ -1179,14 +1179,24 @@ impl LSPHandlers {
         let project_root_dir = Url::parse(format!("file://{root_dir}/").as_str())?;
         info!("uri: {}", &project_root_dir);
 
-        let list = std::fs::read_dir(root_dir)?;
-        let mut root_files: Vec<PathBuf> = vec![];
+        // 1. Collect all YAML files for graph building
+        let mut all_yaml_files = HashMap::new();
+        let pattern = format!("{}/**/*.y*ml", root_dir);
+        if let Ok(paths) = glob::glob(&pattern) {
+            for path in paths.flatten() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(uri) = Url::from_file_path(&path) {
+                        all_yaml_files.insert(uri.to_string(), content);
+                    }
+                }
+            }
+        }
+
+        let mut root_files: Vec<Url> = vec![];
         let mut config_file: Option<PathBuf> = None;
 
+        let list = std::fs::read_dir(root_dir)?;
         for item in list.flatten() {
-            if item.file_name() == ".gitlab-ci.yaml" || item.file_name() == ".gitlab-ci.yml" {
-                root_files.push(item.path());
-            }
             if item.file_name() == ".gitlab-ci-ls.yaml" || item.file_name() == ".gitlab-ci-ls.yml" {
                 config_file = Some(item.path());
             }
@@ -1204,7 +1214,22 @@ impl LSPHandlers {
             };
 
             if let Some(files) = lsp_config.root_files {
-                root_files = Self::resolve_root_files(files, &project_root_dir);
+                for path in Self::resolve_root_files(files, &project_root_dir) {
+                    if let Ok(uri) = Url::from_file_path(path) {
+                        root_files.push(uri);
+                    }
+                }
+            }
+        }
+
+        // If no explicit config, use heuristics
+        if root_files.is_empty() {
+            let graph = graph::build_graph(&all_yaml_files);
+            let roots = graph::find_roots(&graph, &all_yaml_files);
+            for root in roots {
+                if let Ok(uri) = Url::parse(&root) {
+                    root_files.push(uri);
+                }
             }
         }
 
@@ -1212,27 +1237,13 @@ impl LSPHandlers {
             return Err(anyhow::anyhow!("root file missing"));
         }
 
-        for root_file in root_files {
-            let root_file_content = std::fs::read_to_string(&root_file)?;
-
-            let file_uri = {
-                let Some(root_file_str) = root_file.to_str() else {
-                    // continue to next root file if its there
-                    continue;
-                };
-
-                let root_file_str_with_schema = if root_file_str.starts_with('/') {
-                    format!("file://{root_file_str}")
-                } else {
-                    root_file_str.to_string()
-                };
-                match Url::parse(&root_file_str_with_schema) {
-                    Ok(u) => u,
-                    Err(err) => {
-                        warn!("could not parse root file: {root_file_str_with_schema}; got err: {err}");
-                        continue;
-                    }
-                }
+        for file_uri in root_files {
+            let root_file_content = if let Some(content) = all_yaml_files.get(file_uri.as_str()) {
+                content.clone()
+            } else if let Ok(content) = fs::read_to_string(file_uri.path()) {
+                content
+            } else {
+                continue;
             };
 
             let workspace = Arc::new(Workspace::new(file_uri.clone()));
