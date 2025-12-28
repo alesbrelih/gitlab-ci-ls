@@ -16,7 +16,7 @@
     - Create `src/gitlab_ci_ls_parser/fingerprint.rs`
     - Implement `is_gitlab_ci_file(content: &str) -> bool`
     - Add unit tests with sample Ansible, K8s, and GitLab CI files to verify accuracy.
-- [ ] Task: Implement Dependency Graph Builder
+- [x] Task: Implement Dependency Graph Builder e1bcfdd
     - Create `src/gitlab_ci_ls_parser/graph.rs`
     - Implement `build_dependency_graph(files: &[File]) -> (IncludeGraph, ReverseGraph)`
     - Implement `find_roots(graph, files) -> Vec<Uri>` using the fingerprint logic for orphans.
