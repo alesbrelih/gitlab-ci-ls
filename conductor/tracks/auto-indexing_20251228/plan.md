@@ -27,7 +27,7 @@
     - Use `glob` to find all YAML files.
     - Run the Dependency Graph Builder.
     - For each discovered Root, create a `Workspace` and trigger parsing.
-- [ ] Task: Connect to LSP `initialize` event
+- [x] Task: Connect to LSP `initialize` event 8699764
     - Call `scan_workspace` during initialization.
     - Ensure it runs asynchronously (don't block init response).
 
