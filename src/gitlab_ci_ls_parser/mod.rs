@@ -12,6 +12,7 @@ pub mod parser;
 pub mod parser_utils;
 pub mod treesitter;
 pub mod treesitter_queries;
+pub mod workspace;
 
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct LSPPosition {
