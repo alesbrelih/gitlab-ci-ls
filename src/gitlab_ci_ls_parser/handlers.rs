@@ -2341,7 +2341,10 @@ mod tests {
     use lsp_types::Url;
     use std::fs::{self, File};
     use std::path::PathBuf;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
     use tempfile::{tempdir, TempDir};
+    use crate::gitlab_ci_ls_parser::{LSPConfig, LSPExperimental, workspace::Workspace};
 
     // Helper function to create a temporary directory and files within it
     fn setup_test_environment(files_to_create: &[&str], dirs_to_create: &[&str]) -> TempDir {
@@ -2515,5 +2518,64 @@ mod tests {
 
         assert_eq!(resolved.len(), 5);
         assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn test_get_workspace_for_uri() {
+        let cfg = LSPConfig {
+            root_dir: "/root".to_string(),
+            cache_path: "/cache".to_string(),
+            package_map: HashMap::new(),
+            remote_urls: vec![],
+            experimental: LSPExperimental {
+                dependencies_autocomplete_stage_filtering: false,
+            },
+        };
+        let handlers = LSPHandlers {
+            cfg,
+            workspaces: Mutex::new(vec![]),
+            parser: Box::new(crate::gitlab_ci_ls_parser::parser::ParserImpl::new(
+                vec![],
+                HashMap::new(),
+                "/cache".to_string(),
+                Box::new(crate::gitlab_ci_ls_parser::treesitter::TreesitterImpl::new()),
+                Box::new(crate::gitlab_ci_ls_parser::fs_utils::MockFSUtils::new()),
+            )),
+        };
+
+        let ws1_root = Url::parse("file:///root/project1/.gitlab-ci.yml").unwrap();
+        let ws1 = Arc::new(Workspace::new(ws1_root));
+        ws1.files_included
+            .lock()
+            .unwrap()
+            .insert("file:///root/project1/a.yml".to_string());
+
+        let ws2_root = Url::parse("file:///root/project2/.gitlab-ci.yml").unwrap();
+        let ws2 = Arc::new(Workspace::new(ws2_root));
+        ws2.files_included
+            .lock()
+            .unwrap()
+            .insert("file:///root/project2/b.yml".to_string());
+
+        {
+            let mut workspaces = handlers.workspaces.lock().unwrap();
+            workspaces.push(ws1.clone());
+            workspaces.push(ws2.clone());
+        }
+
+        // Test finding workspace for file in project1
+        let found1 = handlers.get_workspace_for_uri("file:///root/project1/a.yml");
+        assert!(found1.is_some());
+        assert_eq!(found1.unwrap().root_uri, ws1.root_uri);
+
+        // Test finding workspace for file in project2
+        let found2 = handlers.get_workspace_for_uri("file:///root/project2/b.yml");
+        assert!(found2.is_some());
+        assert_eq!(found2.unwrap().root_uri, ws2.root_uri);
+
+        // Test fallback to first workspace for unknown file
+        let found3 = handlers.get_workspace_for_uri("file:///root/unknown.yml");
+        assert!(found3.is_some());
+        assert_eq!(found3.unwrap().root_uri, ws1.root_uri);
     }
 }
