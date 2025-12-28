@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::{Arc, Mutex}, time::Instant};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, sync::{Arc, Mutex}, time::Instant};
 
 use anyhow::anyhow;
 use log::{debug, error, info, warn};
@@ -48,13 +48,19 @@ impl LSPHandlers {
         }
     }
 
-    fn get_workspace_for_uri(&self, uri: &str) -> Option<Arc<Workspace>> {
+    fn get_workspaces_for_uri(&self, uri: &str) -> Vec<Arc<Workspace>> {
         let workspaces = self.workspaces.lock().unwrap();
-        workspaces
+        let matches: Vec<_> = workspaces
             .iter()
-            .find(|w| w.files_included.lock().unwrap().contains(uri))
+            .filter(|w| w.files_included.lock().unwrap().contains(uri))
             .cloned()
-            .or_else(|| workspaces.first().cloned())
+            .collect();
+
+        if matches.is_empty() && !workspaces.is_empty() {
+            return vec![workspaces[0].clone()];
+        }
+
+        matches
     }
 
     fn default_stages() -> Vec<String> {
@@ -80,13 +86,16 @@ impl LSPHandlers {
         let params = serde_json::from_value::<HoverParams>(request.params).ok()?;
         let uri = &params.text_document_position_params.text_document.uri;
 
-        let workspace = self.get_workspace_for_uri(uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let node_list = workspace.nodes_ordered_list.lock().unwrap();
-        let nodes = workspace.nodes.lock().unwrap();
-
-        let document = store.get::<String>(&uri.to_string())?;
+        // Use first workspace to get document content (should be same across all workspaces)
+        let document = {
+            let store = workspaces[0].store.lock().unwrap();
+            store.get::<String>(&uri.to_string())?.clone()
+        };
 
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
@@ -94,124 +103,148 @@ impl LSPHandlers {
         let word = parser_utils::ParserUtils::extract_word(line, position.character as usize)?
             .trim_end_matches(':');
 
-        match self.parser.get_position_type(document, position) {
-            parser::PositionType::Extend | PositionType::Dependency => {
-                for (document_uri, node) in nodes.iter() {
-                    for (key, element) in node {
-                        if key.eq(word) {
-                            let cnt = match self.parser.get_full_definition(
-                                GitlabElement {
-                                    key: key.clone(),
-                                    content: element.content.clone(),
-                                    uri: document_uri.clone(),
-                                    ..Default::default()
-                                },
-                                &node_list,
-                            ) {
-                                Ok(c) => c,
-                                Err(err) => return Some(LSPResult::Error(err)),
-                            };
+        for workspace in workspaces {
+            let node_list = workspace.nodes_ordered_list.lock().unwrap();
+            let nodes = workspace.nodes.lock().unwrap();
 
-                            return Some(LSPResult::Hover(HoverResult {
-                                id: request.id,
-                                content: format!("```yaml\n{cnt}\n```"),
-                            }));
+            let res = match self.parser.get_position_type(&document, position) {
+                parser::PositionType::Extend | PositionType::Dependency => {
+                    let mut hover_content = None;
+                    for (document_uri, node) in nodes.iter() {
+                        for (key, element) in node {
+                            if key.eq(word) {
+                                let cnt = match self.parser.get_full_definition(
+                                    GitlabElement {
+                                        key: key.clone(),
+                                        content: element.content.clone(),
+                                        uri: document_uri.clone(),
+                                        ..Default::default()
+                                    },
+                                    &node_list,
+                                ) {
+                                    Ok(c) => c,
+                                    Err(err) => return Some(LSPResult::Error(err)),
+                                };
+
+                                hover_content = Some(LSPResult::Hover(HoverResult {
+                                    id: request.id.clone(),
+                                    content: format!("```yaml\n{cnt}\n```"),
+                                }));
+                                break;
+                            }
+                        }
+                        if hover_content.is_some() {
+                            break;
                         }
                     }
+                    hover_content
                 }
+                parser::PositionType::RootNode => {
+                    let document_uri = format!("file://{}", uri.path());
+                    let mut hover_content = None;
+                    if let Some(node) = nodes.get(&document_uri) {
+                        for (key, element) in node {
+                            if key.eq(word) {
+                                let cnt = match self.parser.get_full_definition(
+                                    GitlabElement {
+                                        key: key.clone(),
+                                        content: element.content.clone(),
+                                        uri: document_uri.clone(),
+                                        ..Default::default()
+                                    },
+                                    &node_list,
+                                ) {
+                                    Ok(c) => c,
+                                    Err(err) => return Some(LSPResult::Error(err)),
+                                };
 
-                None
-            }
-            parser::PositionType::RootNode => {
-                let document_uri = format!("file://{}", uri.path());
-                let node = nodes.get(&document_uri)?;
-
-                for (key, element) in node {
-                    if key.eq(word) {
-                        let cnt = match self.parser.get_full_definition(
-                            GitlabElement {
-                                key: key.clone(),
-                                content: element.content.clone(),
-                                uri: document_uri.clone(),
-                                ..Default::default()
-                            },
-                            &node_list,
-                        ) {
-                            Ok(c) => c,
-                            Err(err) => return Some(LSPResult::Error(err)),
-                        };
-
-                        return Some(LSPResult::Hover(HoverResult {
-                            id: request.id,
-                            content: format!("```yaml\n{cnt}\n```"),
-                        }));
-                    }
-                }
-
-                None
-            }
-            parser::PositionType::RuleReference(RuleReference { node }) => {
-                for (document_uri, n) in nodes.iter() {
-                    for (key, element) in n {
-                        if key.eq(&node) {
-                            let cnt = match self.parser.get_full_definition(
-                                GitlabElement {
-                                    key: key.clone(),
-                                    content: element.content.clone(),
-                                    uri: document_uri.clone(),
-                                    ..Default::default()
-                                },
-                                &node_list,
-                            ) {
-                                Ok(c) => c,
-                                Err(err) => return Some(LSPResult::Error(err)),
-                            };
-
-                            return Some(LSPResult::Hover(HoverResult {
-                                id: request.id,
-                                content: format!("```yaml\n{cnt}\n```"),
-                            }));
+                                hover_content = Some(LSPResult::Hover(HoverResult {
+                                    id: request.id.clone(),
+                                    content: format!("```yaml\n{cnt}\n```"),
+                                }));
+                                break;
+                            }
                         }
                     }
+                    hover_content
                 }
+                parser::PositionType::RuleReference(RuleReference { node }) => {
+                    let mut hover_content = None;
+                    for (document_uri, n) in nodes.iter() {
+                        for (key, element) in n {
+                            if key.eq(&node) {
+                                let cnt = match self.parser.get_full_definition(
+                                    GitlabElement {
+                                        key: key.clone(),
+                                        content: element.content.clone(),
+                                        uri: document_uri.clone(),
+                                        ..Default::default()
+                                    },
+                                    &node_list,
+                                ) {
+                                    Ok(c) => c,
+                                    Err(err) => return Some(LSPResult::Error(err)),
+                                };
 
-                None
-            }
-
-            parser::PositionType::Needs(NodeDefinition { name }) => {
-                let need_split = ParserUtils::strip_quotes(&name)
-                    .split(' ')
-                    .collect::<Vec<&str>>();
-                let node_name = need_split.first()?;
-
-                for (document_uri, n) in nodes.iter() {
-                    for (key, element) in n {
-                        if key.eq(node_name) {
-                            let cnt = match self.parser.get_full_definition(
-                                GitlabElement {
-                                    key: key.clone(),
-                                    content: element.content.clone(),
-                                    uri: document_uri.clone(),
-                                    ..Default::default()
-                                },
-                                &node_list,
-                            ) {
-                                Ok(c) => c,
-                                Err(err) => return Some(LSPResult::Error(err)),
-                            };
-
-                            return Some(LSPResult::Hover(HoverResult {
-                                id: request.id,
-                                content: format!("```yaml\n{cnt}\n```"),
-                            }));
+                                hover_content = Some(LSPResult::Hover(HoverResult {
+                                    id: request.id.clone(),
+                                    content: format!("```yaml\n{cnt}\n```"),
+                                }));
+                                break;
+                            }
+                        }
+                        if hover_content.is_some() {
+                            break;
                         }
                     }
+                    hover_content
                 }
 
-                None
+                parser::PositionType::Needs(NodeDefinition { name }) => {
+                    let need_split = ParserUtils::strip_quotes(&name)
+                        .split(' ')
+                        .collect::<Vec<&str>>();
+                    let node_name = need_split.first()?;
+
+                    let mut hover_content = None;
+                    for (document_uri, n) in nodes.iter() {
+                        for (key, element) in n {
+                            if key.eq(*node_name) {
+                                let cnt = match self.parser.get_full_definition(
+                                    GitlabElement {
+                                        key: key.clone(),
+                                        content: element.content.clone(),
+                                        uri: document_uri.clone(),
+                                        ..Default::default()
+                                    },
+                                    &node_list,
+                                ) {
+                                    Ok(c) => c,
+                                    Err(err) => return Some(LSPResult::Error(err)),
+                                };
+
+                                hover_content = Some(LSPResult::Hover(HoverResult {
+                                    id: request.id.clone(),
+                                    content: format!("```yaml\n{cnt}\n```"),
+                                }));
+                                break;
+                            }
+                        }
+                        if hover_content.is_some() {
+                            break;
+                        }
+                    }
+                    hover_content
+                }
+                _ => None,
+            };
+
+            if res.is_some() {
+                return res;
             }
-            _ => None,
         }
+
+        None
     }
 
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {
@@ -223,80 +256,86 @@ impl LSPHandlers {
             return None;
         }
 
-        let workspace = self.get_workspace_for_uri(params.text_document.uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(params.text_document.uri.as_str());
 
-        let mut store = workspace.store.lock().unwrap();
-        let mut all_nodes = workspace.nodes.lock().unwrap();
-        let mut all_nodes_ordered_list = workspace.nodes_ordered_list.lock().unwrap();
-        let mut all_stages_ordered_list = workspace.stages_ordered_list.lock().unwrap();
-        // reset previous
-        all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
+        for workspace in workspaces {
+            let mut store = workspace.store.lock().unwrap();
+            let mut all_nodes = workspace.nodes.lock().unwrap();
+            let mut all_nodes_ordered_list = workspace.nodes_ordered_list.lock().unwrap();
+            let mut all_stages_ordered_list = workspace.stages_ordered_list.lock().unwrap();
+            // reset previous
+            all_nodes.insert(params.text_document.uri.to_string(), HashMap::new());
 
-        let mut all_variables = workspace.variables.lock().unwrap();
+            let mut all_variables = workspace.variables.lock().unwrap();
 
-        let mut all_components = workspace.components.lock().unwrap();
+            let mut all_components = workspace.components.lock().unwrap();
 
-        let u = workspace.root_uri.clone();
+            let u = workspace.root_uri.clone();
 
-        if let Some(results) = self.parser.parse_contents(
-            &params.text_document.uri,
-            &params.content_changes.first()?.text,
-            &u,
-            false,
-        ) {
-            for file in results.files {
-                workspace.files_included.lock().unwrap().insert(file.path.clone());
-                store.insert(file.path, file.content);
-            }
-
-            for node in results.nodes.clone() {
-                all_nodes
-                    .entry(node.uri.clone())
-                    .or_default()
-                    .insert(node.key.clone(), node);
-            }
-
-            if let Some(e) = all_nodes_ordered_list
-                .iter_mut()
-                .find(|e| e.uri == params.text_document.uri.to_string())
-            {
-                e.elements.clone_from(&results.nodes);
-            } else {
-                // new file?
-                all_nodes_ordered_list.push(GitlabFileElements {
-                    uri: params.text_document.uri.to_string(),
-                    elements: results.nodes.clone(),
-                });
-            }
-
-            if !results.stages.is_empty() {
-                let mut all_stages = workspace.stages.lock().unwrap();
-                all_stages.clear();
-
-                for stage in &results.stages {
-                    info!("found stage: {:?}", &stage);
-                    all_stages.insert(stage.key.clone(), stage.clone());
+            if let Some(results) = self.parser.parse_contents(
+                &params.text_document.uri,
+                &params.content_changes.first()?.text,
+                &u,
+                false,
+            ) {
+                for file in results.files {
+                    workspace
+                        .files_included
+                        .lock()
+                        .unwrap()
+                        .insert(file.path.clone());
+                    store.insert(file.path, file.content);
                 }
 
-                all_stages_ordered_list.clone_from(
-                    &results
-                        .stages
-                        .into_iter()
-                        .map(|s| s.key)
-                        .collect::<Vec<String>>(),
-                );
-            }
+                for node in results.nodes.clone() {
+                    all_nodes
+                        .entry(node.uri.clone())
+                        .or_default()
+                        .insert(node.key.clone(), node);
+                }
 
-            // should be per file...
-            // TODO: clear correct variables
-            for variable in results.variables {
-                info!("found variable: {:?}", &variable);
-                all_variables.insert(variable.key.clone(), variable);
-            }
+                if let Some(e) = all_nodes_ordered_list
+                    .iter_mut()
+                    .find(|e| e.uri == params.text_document.uri.to_string())
+                {
+                    e.elements.clone_from(&results.nodes);
+                } else {
+                    // new file?
+                    all_nodes_ordered_list.push(GitlabFileElements {
+                        uri: params.text_document.uri.to_string(),
+                        elements: results.nodes.clone(),
+                    });
+                }
 
-            for component in results.components {
-                info!("found component: {:?}", &component);
-                all_components.insert(component.uri.clone(), component);
+                if !results.stages.is_empty() {
+                    let mut all_stages = workspace.stages.lock().unwrap();
+                    all_stages.clear();
+
+                    for stage in &results.stages {
+                        info!("found stage: {:?}", &stage);
+                        all_stages.insert(stage.key.clone(), stage.clone());
+                    }
+
+                    all_stages_ordered_list.clone_from(
+                        &results
+                            .stages
+                            .into_iter()
+                            .map(|s| s.key)
+                            .collect::<Vec<String>>(),
+                    );
+                }
+
+                // should be per file...
+                // TODO: clear correct variables
+                for variable in results.variables {
+                    info!("found variable: {:?}", &variable);
+                    all_variables.insert(variable.key.clone(), variable);
+                }
+
+                for component in results.components {
+                    info!("found component: {:?}", &component);
+                    all_components.insert(component.uri.clone(), component);
+                }
             }
         }
 
@@ -309,50 +348,50 @@ impl LSPHandlers {
         let params =
             serde_json::from_value::<DidOpenTextDocumentParams>(notification.params).ok()?;
 
-        let workspace = self.get_workspace_for_uri(params.text_document.uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(params.text_document.uri.as_str());
 
-        let in_progress = workspace.indexing_state.lock().unwrap();
-        drop(in_progress);
+        for workspace in &workspaces {
+            let in_progress = workspace.indexing_state.lock().unwrap();
+            drop(in_progress);
 
-        let mut store = workspace.store.lock().unwrap();
-        let mut all_nodes = workspace.nodes.lock().unwrap();
-        let mut all_stages = workspace.stages.lock().unwrap();
+            let mut store = workspace.store.lock().unwrap();
+            let mut all_nodes = workspace.nodes.lock().unwrap();
+            let mut all_stages = workspace.stages.lock().unwrap();
 
-        let u = workspace.root_uri.clone();
+            let u = workspace.root_uri.clone();
 
-        if let Some(results) = self.parser.parse_contents(
-            &params.text_document.uri,
-            &params.text_document.text,
-            &u,
-            true,
-        ) {
-            for file in results.files {
-                workspace.files_included.lock().unwrap().insert(file.path.clone());
-                store.insert(file.path, file.content);
-            }
+            if let Some(results) = self.parser.parse_contents(
+                &params.text_document.uri,
+                &params.text_document.text,
+                &u,
+                true,
+            ) {
+                for file in results.files {
+                    workspace
+                        .files_included
+                        .lock()
+                        .unwrap()
+                        .insert(file.path.clone());
+                    store.insert(file.path, file.content);
+                }
 
-            for node in results.nodes {
-                info!("found node: {:?}", &node);
+                for node in results.nodes {
+                    info!("found node: {:?}", &node);
 
-                all_nodes
-                    .entry(node.uri.clone())
-                    .or_default()
-                    .insert(node.key.clone(), node);
-            }
+                    all_nodes
+                        .entry(node.uri.clone())
+                        .or_default()
+                        .insert(node.key.clone(), node);
+                }
 
-            for stage in results.stages {
-                info!("found stage: {:?}", &stage);
-                all_stages.insert(stage.key.clone(), stage);
+                for stage in results.stages {
+                    info!("found stage: {:?}", &stage);
+                    all_stages.insert(stage.key.clone(), stage);
+                }
             }
         }
 
         info!("finished searching");
-
-        // releasing lock because generate diagnostics grabs it
-        // and is used in two places
-        drop(store);
-        drop(all_nodes);
-        drop(all_stages);
 
         self.generate_diagnostics(params.text_document.uri)
     }
@@ -362,147 +401,167 @@ impl LSPHandlers {
         let params = serde_json::from_value::<GotoTypeDefinitionParams>(request.params).ok()?;
         let document_uri = params.text_document_position_params.text_document.uri;
 
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let store = &*store;
-        let node_list = workspace.nodes_ordered_list.lock().unwrap();
-        let document = store.get::<String>(&document_uri.to_string())?;
+        let document = {
+            let workspace = &workspaces[0];
+            let store = workspace.store.lock().unwrap();
+            store.get::<String>(&document_uri.clone().into())?.clone()
+        };
+
         let position = params.text_document_position_params.position;
-        let stages = workspace.stages.lock().unwrap();
 
         let mut locations: Vec<LSPLocation> = vec![];
 
-        match self.parser.get_position_type(document, position) {
-            parser::PositionType::RootNode
-            | parser::PositionType::Extend
-            | parser::PositionType::Dependency => {
-                let line = document.lines().nth(position.line as usize)?;
-                let word =
-                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?
-                        .trim_end_matches(':');
+        for workspace in workspaces {
+            let store = workspace.store.lock().unwrap();
+            let node_list = workspace.nodes_ordered_list.lock().unwrap();
+            let stages = workspace.stages.lock().unwrap();
 
-                for (uri, content) in store {
-                    if let Some(element) = self.parser.get_root_node(uri, content, word) {
-                        if document_uri.as_str().ends_with(uri)
-                            && line.eq(&format!("{}:", element.key.as_str()))
-                        {
-                            continue;
+            match self.parser.get_position_type(&document, position) {
+                parser::PositionType::RootNode
+                | parser::PositionType::Extend
+                | parser::PositionType::Dependency => {
+                    let line = document.lines().nth(position.line as usize)?;
+                    let word = parser_utils::ParserUtils::extract_word(
+                        line,
+                        position.character as usize,
+                    )?
+                    .trim_end_matches(':');
+
+                    for (uri, content) in store.iter() {
+                        if let Some(element) = self.parser.get_root_node(uri, content, word) {
+                            if document_uri.as_str().ends_with(uri)
+                                && line.eq(&format!("{}:", element.key.as_str()))
+                            {
+                                continue;
+                            }
+
+                            locations.push(LSPLocation {
+                                uri: uri.clone(),
+                                range: element.range,
+                            });
                         }
-
-                        locations.push(LSPLocation {
-                            uri: uri.clone(),
-                            range: element.range,
-                        });
                     }
                 }
-            }
-            parser::PositionType::Include(info) => {
-                if let Some(include) = self.on_definition_include(&workspace, info, store) {
-                    locations.push(include);
+                parser::PositionType::Include(info) => {
+                    if let Some(include) = self.on_definition_include(&workspace, info, &store) {
+                        locations.push(include);
+                    }
                 }
-            }
-            parser::PositionType::Needs(node) => {
-                for (uri, content) in store {
-                    let need_split = node.name.split(' ').collect::<Vec<&str>>();
+                parser::PositionType::Needs(node) => {
+                    for (uri, content) in store.iter() {
+                        let need_split = node.name.split(' ').collect::<Vec<&str>>();
 
-                    // need can be: needs: "wow [matrix1, matrix2]
-                    // currently just ignore matrixes
-                    match need_split.len() {
-                        1 => {
-                            if let Some(element) = self.parser.get_root_node(
-                                uri,
-                                content,
-                                parser_utils::ParserUtils::strip_quotes(node.name.as_str()),
-                            ) {
-                                locations.push(LSPLocation {
-                                    uri: uri.clone(),
-                                    range: element.range,
-                                });
+                        match need_split.len() {
+                            1 => {
+                                if let Some(element) = self.parser.get_root_node(
+                                    uri,
+                                    content,
+                                    parser_utils::ParserUtils::strip_quotes(node.name.as_str()),
+                                ) {
+                                    locations.push(LSPLocation {
+                                        uri: uri.clone(),
+                                        range: element.range,
+                                    });
+                                }
                             }
-                        }
 
-                        2 => {
-                            if let Some(element) = self.parser.get_root_node(
-                                uri,
-                                content,
-                                parser_utils::ParserUtils::strip_quotes(need_split[0]),
-                            ) {
-                                locations.push(LSPLocation {
-                                    uri: uri.clone(),
-                                    range: element.range,
-                                });
+                            2 => {
+                                if let Some(element) = self.parser.get_root_node(
+                                    uri,
+                                    content,
+                                    parser_utils::ParserUtils::strip_quotes(need_split[0]),
+                                ) {
+                                    locations.push(LSPLocation {
+                                        uri: uri.clone(),
+                                        range: element.range,
+                                    });
+                                }
                             }
-                        }
 
-                        invalid => {
-                            warn!(
+                            invalid => {
+                                warn!(
                                 "gotoref: invalid split len. got: {invalid}; needs: {need_split:?}"
                             );
+                            }
                         }
                     }
                 }
-            }
-            parser::PositionType::Stage => {
-                let line = document.lines().nth(position.line as usize)?;
-                let word =
-                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
+                parser::PositionType::Stage => {
+                    let line = document.lines().nth(position.line as usize)?;
+                    let word = parser_utils::ParserUtils::extract_word(
+                        line,
+                        position.character as usize,
+                    )?;
 
-                if let Some(el) = stages.get(word) {
-                    locations.push(LSPLocation {
-                        uri: el.uri.clone(),
-                        range: el.range.clone(),
-                    });
-                }
-            }
-            parser::PositionType::Variable => {
-                let line = document.lines().nth(position.line as usize)?;
-                let word =
-                    parser_utils::ParserUtils::extract_variable(line, position.character as usize)?;
-
-                let variable_locations = self.parser.get_variable_definitions(
-                    word,
-                    document_uri.as_str(),
-                    position,
-                    store,
-                    &node_list,
-                )?;
-
-                for location in variable_locations {
-                    locations.push(LSPLocation {
-                        uri: location.uri,
-                        range: location.range,
-                    });
-                }
-                let mut root = workspace
-                    .variables
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .filter(|(name, _)| name.starts_with(word))
-                    .map(|(_, el)| LSPLocation {
-                        uri: el.uri.clone(),
-                        range: el.range.clone(),
-                    })
-                    .collect::<Vec<LSPLocation>>();
-
-                locations.append(&mut root);
-            }
-            parser::PositionType::RuleReference(RuleReference { node }) => {
-                for (uri, content) in store {
-                    if let Some(element) = self.parser.get_root_node(uri, content, &node) {
+                    if let Some(el) = stages.get(word) {
                         locations.push(LSPLocation {
-                            uri: uri.clone(),
-                            range: element.range,
+                            uri: el.uri.clone(),
+                            range: el.range.clone(),
                         });
                     }
                 }
-            }
-            parser::PositionType::None => {
-                error!("invalid position type for goto def");
-                return None;
+                parser::PositionType::Variable => {
+                    let line = document.lines().nth(position.line as usize)?;
+                    let word = parser_utils::ParserUtils::extract_variable(
+                        line,
+                        position.character as usize,
+                    )?;
+
+                    let variable_locations = self.parser.get_variable_definitions(
+                        word,
+                        document_uri.as_str(),
+                        position,
+                        &store,
+                        &node_list,
+                    )?;
+
+                    for location in variable_locations {
+                        locations.push(LSPLocation {
+                            uri: location.uri,
+                            range: location.range,
+                        });
+                    }
+                    let mut root = workspace
+                        .variables
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|(name, _)| name.starts_with(word))
+                        .map(|(_, el)| LSPLocation {
+                            uri: el.uri.clone(),
+                            range: el.range.clone(),
+                        })
+                        .collect::<Vec<LSPLocation>>();
+
+                    locations.append(&mut root);
+                }
+                parser::PositionType::RuleReference(RuleReference { node }) => {
+                    for (uri, content) in store.iter() {
+                        if let Some(element) = self.parser.get_root_node(uri, content, &node) {
+                            locations.push(LSPLocation {
+                                uri: uri.clone(),
+                                range: element.range,
+                            });
+                        }
+                    }
+                }
+                parser::PositionType::None => {
+                    error!("invalid position type for goto def");
+                }
             }
         }
+
+        // Dedup locations
+        let mut seen = HashSet::new();
+        locations.retain(|loc| {
+            let key = format!("{}-{:?}", loc.uri, loc.range);
+            seen.insert(key)
+        });
 
         Some(LSPResult::Definition(DefinitionResult {
             id: request.id,
@@ -675,65 +734,82 @@ impl LSPHandlers {
         let params: CompletionParams = serde_json::from_value(request.params).ok()?;
         let document_uri = params.text_document_position.text_document.uri;
 
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let document = store.get::<String>(&document_uri.clone().into())?;
+        let document = {
+            let workspace = &workspaces[0];
+            let store = workspace.store.lock().unwrap();
+            store.get::<String>(&document_uri.clone().into())?.clone()
+        };
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let items = match self.parser.get_position_type(document, position) {
-            parser::PositionType::Stage => {
-                self.on_completion_stages(&workspace, line, position).ok()?
+        let mut all_items = vec![];
+
+        for workspace in workspaces {
+            let items = match self.parser.get_position_type(&document, position) {
+                parser::PositionType::Stage => {
+                    self.on_completion_stages(&workspace, line, position).ok()
+                }
+                parser::PositionType::Dependency => self
+                    .on_completion_dependencies(
+                        &workspace,
+                        document_uri.as_ref(),
+                        &document,
+                        line,
+                        position,
+                    )
+                    .ok(),
+                parser::PositionType::Extend => {
+                    self.on_completion_extends(&workspace, line, position).ok()
+                }
+                parser::PositionType::Variable => {
+                    self.on_completion_variables(&workspace, line, position).ok()
+                }
+                parser::PositionType::Needs(_) => {
+                    self.on_completion_needs(&workspace, line, position).ok()
+                }
+                parser::PositionType::Include(IncludeInformation {
+                    remote: None,
+                    remote_url: None,
+                    local: None,
+                    basic: None,
+                    component: Some(component),
+                }) => self
+                    .on_completion_component(&workspace, line, position, &component)
+                    .ok(),
+                parser::PositionType::Include(IncludeInformation {
+                    remote: Some(remote),
+                    remote_url: None,
+                    local: None,
+                    basic: None,
+                    component: None,
+                }) => self
+                    .on_completion_remote(&workspace, line, position, &remote)
+                    .ok(),
+                parser::PositionType::RuleReference(_) => {
+                    self.on_completion_rule_reference(&workspace, line, position).ok()
+                }
+                _ => None,
+            };
+
+            if let Some(items) = items {
+                all_items.extend(items);
             }
-            parser::PositionType::Dependency => self
-                .on_completion_dependencies(
-                    &workspace,
-                    document_uri.as_ref(),
-                    document,
-                    line,
-                    position,
-                )
-                .ok()?,
-            parser::PositionType::Extend => {
-                self.on_completion_extends(&workspace, line, position).ok()?
-            }
-            parser::PositionType::Variable => {
-                self.on_completion_variables(&workspace, line, position).ok()?
-            }
-            parser::PositionType::Needs(_) => {
-                self.on_completion_needs(&workspace, line, position).ok()?
-            }
-            parser::PositionType::Include(IncludeInformation {
-                remote: None,
-                remote_url: None,
-                local: None,
-                basic: None,
-                component: Some(component),
-            }) => self
-                .on_completion_component(&workspace, line, position, &component)
-                .ok()?,
-            parser::PositionType::Include(IncludeInformation {
-                remote: Some(remote),
-                remote_url: None,
-                local: None,
-                basic: None,
-                component: None,
-            }) => self
-                .on_completion_remote(&workspace, line, position, &remote)
-                .ok()?,
-            parser::PositionType::RuleReference(_) => {
-                self.on_completion_rule_reference(&workspace, line, position).ok()?
-            }
-            _ => return None,
-        };
+        }
+
+        let mut seen = HashSet::new();
+        all_items.retain(|item| seen.insert(item.label.clone()));
 
         info!("AUTOCOMPLETE ELAPSED: {:?}", start.elapsed());
 
         Some(LSPResult::Completion(CompletionResult {
             id: request.id,
-            list: items,
+            list: all_items,
         }))
     }
 
@@ -1372,199 +1448,221 @@ impl LSPHandlers {
     #[allow(clippy::too_many_lines)]
     fn generate_diagnostics(&self, document_uri: lsp_types::Url) -> Option<LSPResult> {
         let start = Instant::now();
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
-
-        let store = workspace.store.lock().unwrap();
-        let all_nodes = workspace.nodes.lock().unwrap();
-
-        let content: String = store.get(&document_uri.to_string())?.clone();
-
-        let extends = self
-            .parser
-            .get_all_extends(document_uri.to_string(), content.as_str(), None);
-
-        let mut diagnostics: Vec<Diagnostic> = vec![];
-
-        'extend: for extend in extends {
-            if extend.uri == document_uri.to_string() {
-                for (_, root_nodes) in all_nodes.iter() {
-                    if root_nodes.get(&extend.key).is_some() {
-                        continue 'extend;
-                    }
-                }
-
-                diagnostics.push(Diagnostic::new_simple(
-                    lsp_types::Range {
-                        start: lsp_types::Position {
-                            line: extend.range.start.line,
-                            character: extend.range.start.character,
-                        },
-                        end: lsp_types::Position {
-                            line: extend.range.end.line,
-                            character: extend.range.end.character,
-                        },
-                    },
-                    format!("Rule: {} does not exist.", extend.key),
-                ));
-            }
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
         }
 
-        let stages = self
-            .parser
-            .get_all_stages(document_uri.as_ref(), content.as_str(), None);
+        let mut all_diagnostics: Vec<Diagnostic> = vec![];
 
-        let all_stages = {
-            let locked_stages = workspace.stages.lock().unwrap();
+        for workspace in workspaces {
+            let store = workspace.store.lock().unwrap();
+            let all_nodes = workspace.nodes.lock().unwrap();
 
-            let keys: Vec<_> = locked_stages.keys().map(ToString::to_string).collect();
+            let content: String = match store.get(&document_uri.to_string()) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
 
-            if keys.is_empty() {
-                LSPHandlers::default_stages()
-            } else {
-                keys
-            }
-        };
+            let extends = self
+                .parser
+                .get_all_extends(document_uri.to_string(), content.as_str(), None);
 
-        for stage in stages {
-            if !all_stages.contains(&stage.key) {
-                diagnostics.push(Diagnostic::new_simple(
-                    lsp_types::Range {
-                        start: lsp_types::Position {
-                            line: stage.range.start.line,
-                            character: stage.range.start.character,
-                        },
-                        end: lsp_types::Position {
-                            line: stage.range.end.line,
-                            character: stage.range.end.character,
-                        },
-                    },
-                    format!("Stage: {} does not exist.", stage.key),
-                ));
-            }
-        }
+            let mut diagnostics: Vec<Diagnostic> = vec![];
 
-        let needs = self
-            .parser
-            .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
-
-        'needs: for need in needs {
-            let need_split = need.key.split(' ').collect::<Vec<&str>>();
-
-            match need_split.len() {
-                1 => {
-                    // default needs containing just a reference
-                    // to a job
-                    for (_, node) in all_nodes.iter() {
-                        if node.get(need.key.as_str()).is_some() {
-                            continue 'needs;
+            'extend: for extend in extends {
+                if extend.uri == document_uri.to_string() {
+                    for (_, root_nodes) in all_nodes.iter() {
+                        if root_nodes.get(&extend.key).is_some() {
+                            continue 'extend;
                         }
                     }
-                }
 
-                2 => {
-                    // special needs where it can reference a matrix inside a job
-                    // needs: "job-name [matrix-value-1,matrix-value-2,..]
-                    // currently just check split value that it matches a job
-                    // TODO: handle matrix references
-
-                    let node_key = need_split[0];
-                    for (_, node) in all_nodes.iter() {
-                        if node.get(node_key).is_some() {
-                            continue 'needs;
-                        }
-                    }
-                }
-
-                invalid => {
-                    warn!("invalid split len. got: {invalid}; needs: {need_split:?}");
-                }
-            }
-
-            diagnostics.push(Diagnostic::new_simple(
-                lsp_types::Range {
-                    start: lsp_types::Position {
-                        line: need.range.start.line,
-                        character: need.range.start.character,
-                    },
-                    end: lsp_types::Position {
-                        line: need.range.end.line,
-                        character: need.range.end.character,
-                    },
-                },
-                format!("Job: {} does not exist.", need.key),
-            ));
-        }
-
-        let components = self
-            .parser
-            .get_all_components(document_uri.as_ref(), content.as_str());
-
-        let all_components = workspace.components.lock().unwrap();
-        for component in components {
-            if let Some(spec) = all_components.get(&component.key) {
-                component.inputs.iter().for_each(|i| {
-                    // check invalid ones -> those that aren't defined in spec
-                    let spec_definition = &spec.inputs.iter().find(|si| si.key == i.key);
-
-                    if let Some(spec_definition) = spec_definition {
-                        generate_component_diagnostics_from_spec(
-                            i,
-                            spec_definition,
-                            &mut diagnostics,
-                        );
-                    } else {
-                        // wasn't found in spec -> invalid key
-                        diagnostics.push(Diagnostic::new_simple(
-                            lsp_types::Range {
-                                start: lsp_types::Position {
-                                    line: i.range.start.line,
-                                    character: i.range.start.character,
-                                },
-                                end: lsp_types::Position {
-                                    line: i.range.end.line,
-                                    character: i.range.end.character,
-                                },
+                    diagnostics.push(Diagnostic::new_simple(
+                        lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: extend.range.start.line,
+                                character: extend.range.start.character,
                             },
-                            format!(
-                                "Invalid input key. Key needs to be one of: '{}'.",
-                                spec.inputs
-                                    .iter()
-                                    .map(|i| i.key.clone())
-                                    .collect::<Vec<String>>()
-                                    .join(", ")
-                            ),
-                        ));
-                    }
-                });
+                            end: lsp_types::Position {
+                                line: extend.range.end.line,
+                                character: extend.range.end.character,
+                            },
+                        },
+                        format!("Rule: {} does not exist.", extend.key),
+                    ));
+                }
             }
-        }
 
-        let caches = self
-            .parser
-            .get_all_multi_caches(document_uri.as_ref(), content.as_str());
+            let stages = self
+                .parser
+                .get_all_stages(document_uri.as_ref(), content.as_str(), None);
 
-        let cache_diagnostics = caches.iter().flat_map(|c| c.cache_items.iter().skip(MAX_CACHE_ITEMS).map(|el| {
-                Diagnostic::new_simple(
+            let all_stages = {
+                let locked_stages = workspace.stages.lock().unwrap();
+
+                let keys: Vec<_> = locked_stages.keys().map(ToString::to_string).collect();
+
+                if keys.is_empty() {
+                    LSPHandlers::default_stages()
+                } else {
+                    keys
+                }
+            };
+
+            for stage in stages {
+                if !all_stages.contains(&stage.key) {
+                    diagnostics.push(Diagnostic::new_simple(
+                        lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: stage.range.start.line,
+                                character: stage.range.start.character,
+                            },
+                            end: lsp_types::Position {
+                                line: stage.range.end.line,
+                                character: stage.range.end.character,
+                            },
+                        },
+                        format!("Stage: {} does not exist.", stage.key),
+                    ));
+                }
+            }
+
+            let needs = self
+                .parser
+                .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
+
+            'needs: for need in needs {
+                let need_split = need.key.split(' ').collect::<Vec<&str>>();
+
+                match need_split.len() {
+                    1 => {
+                        // default needs containing just a reference
+                        // to a job
+                        for (_, node) in all_nodes.iter() {
+                            if node.get(need.key.as_str()).is_some() {
+                                continue 'needs;
+                            }
+                        }
+                    }
+
+                    2 => {
+                        // special needs where it can reference a matrix inside a job
+                        // needs: "job-name [matrix-value-1,matrix-value-2,..]
+                        // currently just check split value that it matches a job
+                        // TODO: handle matrix references
+
+                        let node_key = need_split[0];
+                        for (_, node) in all_nodes.iter() {
+                            if node.get(node_key).is_some() {
+                                continue 'needs;
+                            }
+                        }
+                    }
+
+                    invalid => {
+                        warn!("invalid split len. got: {invalid}; needs: {need_split:?}");
+                    }
+                }
+
+                diagnostics.push(Diagnostic::new_simple(
                     lsp_types::Range {
                         start: lsp_types::Position {
-                            line: el.range.start.line,
-                            character: el.range.start.character,
+                            line: need.range.start.line,
+                            character: need.range.start.character,
                         },
                         end: lsp_types::Position {
-                            line: el.range.end.line,
-                            character: el.range.end.character,
+                            line: need.range.end.line,
+                            character: need.range.end.character,
                         },
                     },
-                    "You can have a maximum of 4 caches: https://docs.gitlab.com/ee/ci/caching/#use-multiple-caches".to_string(),
-                )
-            }));
+                    format!("Job: {} does not exist.", need.key),
+                ));
+            }
 
-        diagnostics.extend(cache_diagnostics);
+            let components = self
+                .parser
+                .get_all_components(document_uri.as_ref(), content.as_str());
+
+            let all_components = workspace.components.lock().unwrap();
+            for component in components {
+                if let Some(spec) = all_components.get(&component.key) {
+                    component.inputs.iter().for_each(|i| {
+                        // check invalid ones -> those that aren't defined in spec
+                        let spec_definition = &spec.inputs.iter().find(|si| si.key == i.key);
+
+                        if let Some(spec_definition) = spec_definition {
+                            generate_component_diagnostics_from_spec(
+                                i,
+                                spec_definition,
+                                &mut diagnostics,
+                            );
+                        } else {
+                            // wasn't found in spec -> invalid key
+                            diagnostics.push(Diagnostic::new_simple(
+                                lsp_types::Range {
+                                    start: lsp_types::Position {
+                                        line: i.range.start.line,
+                                        character: i.range.start.character,
+                                    },
+                                    end: lsp_types::Position {
+                                        line: i.range.end.line,
+                                        character: i.range.end.character,
+                                    },
+                                },
+                                format!(
+                                    "Invalid input key. Key needs to be one of: '{}'.",
+                                    spec.inputs
+                                        .iter()
+                                        .map(|i| i.key.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                ),
+                            ));
+                        }
+                    });
+                }
+            }
+
+            let caches = self
+                .parser
+                .get_all_multi_caches(document_uri.as_ref(), content.as_str());
+
+            let cache_diagnostics = caches.iter().flat_map(|c| {
+                c.cache_items.iter().skip(MAX_CACHE_ITEMS).map(|el| {
+                    Diagnostic::new_simple(
+                        lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: el.range.start.line,
+                                character: el.range.start.character,
+                            },
+                            end: lsp_types::Position {
+                                line: el.range.end.line,
+                                character: el.range.end.character,
+                            },
+                        },
+                        "You can have a maximum of 4 caches: https://docs.gitlab.com/ee/ci/caching/#use-multiple-caches".to_string(),
+                    )
+                })
+            });
+
+            diagnostics.extend(cache_diagnostics);
+            all_diagnostics.extend(diagnostics);
+        }
+
+        let mut seen = HashSet::new();
+        all_diagnostics.retain(|d| {
+            let key = format!(
+                "{:?}-{:?}-{:?}-{:?}",
+                d.range, d.message, d.severity, d.code
+            );
+            seen.insert(key)
+        });
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(DiagnosticsNotification {
             uri: document_uri,
-            diagnostics,
+            diagnostics: all_diagnostics,
         }))
     }
 
@@ -1581,64 +1679,85 @@ impl LSPHandlers {
         let params = serde_json::from_value::<lsp_types::ReferenceParams>(request.params).ok()?;
         let document_uri = &params.text_document_position.text_document.uri;
 
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let document = store.get::<String>(&document_uri.to_string())?;
+        let document = {
+            let workspace = &workspaces[0];
+            let store = workspace.store.lock().unwrap();
+            store.get::<String>(&document_uri.to_string())?.clone()
+        };
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let position_type = self.parser.get_position_type(document, position);
+        let position_type = self.parser.get_position_type(&document, position);
         let mut references: Vec<GitlabElement> = vec![];
 
-        match position_type {
-            parser::PositionType::Extend => {
-                let word =
-                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
+        for workspace in workspaces {
+            let store = workspace.store.lock().unwrap();
 
-                for (uri, content) in store.iter() {
-                    let mut extends =
-                        self.parser
-                            .get_all_extends(uri.clone(), content.as_str(), Some(word));
-                    references.append(&mut extends);
-                }
-            }
-            parser::PositionType::RootNode => {
-                let word =
-                    parser_utils::ParserUtils::extract_word(line, position.character as usize)?
-                        .trim_end_matches(':');
+            match &position_type {
+                parser::PositionType::Extend => {
+                    let word = parser_utils::ParserUtils::extract_word(
+                        line,
+                        position.character as usize,
+                    )?;
 
-                // currently support only those that are extends
-                if word.starts_with('.') {
                     for (uri, content) in store.iter() {
                         let mut extends =
                             self.parser
                                 .get_all_extends(uri.clone(), content.as_str(), Some(word));
                         references.append(&mut extends);
                     }
-                } else {
-                    for (uri, content) in store.iter() {
-                        let mut extends = self.parser.get_all_job_needs(
-                            uri.clone(),
-                            content.as_str(),
-                            Some(word),
-                        );
-                        references.append(&mut extends);
+                }
+                parser::PositionType::RootNode => {
+                    let word = parser_utils::ParserUtils::extract_word(
+                        line,
+                        position.character as usize,
+                    )?
+                    .trim_end_matches(':');
+
+                    // currently support only those that are extends
+                    if word.starts_with('.') {
+                        for (uri, content) in store.iter() {
+                            let mut extends =
+                                self.parser
+                                    .get_all_extends(uri.clone(), content.as_str(), Some(word));
+                            references.append(&mut extends);
+                        }
+                    } else {
+                        for (uri, content) in store.iter() {
+                            let mut extends = self.parser.get_all_job_needs(
+                                uri.clone(),
+                                content.as_str(),
+                                Some(word),
+                            );
+                            references.append(&mut extends);
+                        }
                     }
                 }
-            }
-            parser::PositionType::Stage => {
-                let word =
-                    parser_utils::ParserUtils::extract_word(line, position.character as usize);
+                parser::PositionType::Stage => {
+                    let word =
+                        parser_utils::ParserUtils::extract_word(line, position.character as usize);
 
-                for (uri, content) in store.iter() {
-                    let mut stages = self.parser.get_all_stages(uri, content.as_str(), word);
-                    references.append(&mut stages);
+                    for (uri, content) in store.iter() {
+                        let mut stages = self.parser.get_all_stages(uri, content.as_str(), word);
+                        references.append(&mut stages);
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
+
+        // Dedup references
+        let mut seen = HashSet::new();
+        references.retain(|r| {
+            let key = format!("{}-{:?}-{:?}", r.key, r.uri, r.range);
+            seen.insert(key)
+        });
 
         info!("REFERENCES ELAPSED: {:?}", start.elapsed());
 
@@ -1791,103 +1910,111 @@ impl LSPHandlers {
             }));
         }
 
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let document = store.get::<String>(&document_uri.clone().into())?;
+        let document = {
+            let store = workspaces[0].store.lock().unwrap();
+            store.get::<String>(&document_uri.clone().into())?.clone()
+        };
 
         let position = params.position;
         let line = document.lines().nth(position.line as usize)?;
 
-        let res = match self.parser.get_position_type(document, position) {
-            parser::PositionType::RootNode => {
-                let word = parser_utils::ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    char::is_whitespace,
-                );
-                let after = parser_utils::ParserUtils::word_after_cursor(
-                    line,
-                    position.character as usize,
-                    char::is_whitespace,
-                )
-                .trim_end_matches(':');
+        let mut res = None;
 
-                let full_word = format!("{word}{after}");
-                if LSPHandlers::is_predefined_root_element(&full_word) {
-                    return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
-                        id: request.id,
-                        range: None,
-                        err: Some("Cannot rename Gitlab elements".to_string()),
-                    }));
-                }
+        for workspace in workspaces {
+            let store = workspace.store.lock().unwrap();
 
-                Some(LSPResult::PrepareRename(super::PrepareRenameResult {
-                    id: request.id,
-                    range: Some(Range {
-                        start: LSPPosition {
-                            line: position.line,
-                            character: position.character - u32::try_from(word.len()).ok()?,
-                        },
-                        end: LSPPosition {
-                            line: position.line,
-                            character: position.character + u32::try_from(after.len()).ok()?,
-                        },
-                    }),
-                    err: None,
-                }))
-            }
-            parser::PositionType::Extend
-            | parser::PositionType::Needs(_)
-            | parser::PositionType::RuleReference(_) => {
-                let word = parser_utils::ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c| c.is_whitespace() || c == '\'' || c == '"',
-                );
-                let after = parser_utils::ParserUtils::word_after_cursor(
-                    line,
-                    position.character as usize,
-                    |c| c.is_whitespace() || c == '\'' || c == '"',
-                );
+            match self.parser.get_position_type(&document, position) {
+                parser::PositionType::RootNode => {
+                    let word = parser_utils::ParserUtils::word_before_cursor(
+                        line,
+                        position.character as usize,
+                        char::is_whitespace,
+                    );
+                    let after = parser_utils::ParserUtils::word_after_cursor(
+                        line,
+                        position.character as usize,
+                        char::is_whitespace,
+                    )
+                    .trim_end_matches(':');
 
-                let job = format!("{word}{after}");
-                for (uri, content) in store.iter() {
-                    if !self.can_path_be_modified(uri) {
-                        continue;
-                    }
-
-                    if self.parser.get_root_node_key(uri, content, &job).is_some() {
-                        return Some(LSPResult::PrepareRename(PrepareRenameResult {
-                            id: request.id,
-                            range: Some(Range {
-                                start: LSPPosition {
-                                    line: position.line,
-                                    character: position.character
-                                        - u32::try_from(word.len()).ok()?,
-                                },
-                                end: LSPPosition {
-                                    line: position.line,
-                                    character: position.character
-                                        + u32::try_from(after.len()).ok()?,
-                                },
-                            }),
-                            err: None,
+                    let full_word = format!("{word}{after}");
+                    if LSPHandlers::is_predefined_root_element(&full_word) {
+                        return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                            id: request.id.clone(),
+                            range: None,
+                            err: Some("Cannot rename Gitlab elements".to_string()),
                         }));
                     }
+
+                    return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                        id: request.id.clone(),
+                        range: Some(Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len()).ok()?,
+                            },
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len()).ok()?,
+                            },
+                        }),
+                        err: None,
+                    }));
                 }
-                return Some(LSPResult::PrepareRename(super::PrepareRenameResult {
-                    id: request.id,
-                    range: None,
-                    err: Some("Could not find definition".to_string()),
-                }));
+                parser::PositionType::Extend
+                | parser::PositionType::Needs(_)
+                | parser::PositionType::RuleReference(_) => {
+                    let word = parser_utils::ParserUtils::word_before_cursor(
+                        line,
+                        position.character as usize,
+                        |c| c.is_whitespace() || c == '\'' || c == '"',
+                    );
+                    let after = parser_utils::ParserUtils::word_after_cursor(
+                        line,
+                        position.character as usize,
+                        |c| c.is_whitespace() || c == '\'' || c == '"',
+                    );
+
+                    let job = format!("{word}{after}");
+                    for (uri, content) in store.iter() {
+                        if !self.can_path_be_modified(uri) {
+                            continue;
+                        }
+
+                        if self.parser.get_root_node_key(uri, content, &job).is_some() {
+                            return Some(LSPResult::PrepareRename(PrepareRenameResult {
+                                id: request.id.clone(),
+                                range: Some(Range {
+                                    start: LSPPosition {
+                                        line: position.line,
+                                        character: position.character
+                                            - u32::try_from(word.len()).ok()?,
+                                    },
+                                    end: LSPPosition {
+                                        line: position.line,
+                                        character: position.character
+                                            + u32::try_from(after.len()).ok()?,
+                                    },
+                                }),
+                                err: None,
+                            }));
+                        }
+                    }
+                }
+                _ => {
+                    res = Some(LSPResult::PrepareRename(super::PrepareRenameResult {
+                        id: request.id.clone(),
+                        range: None,
+                        err: Some("Not supported".to_string()),
+                    }));
+                }
             }
-            _ => Some(LSPResult::PrepareRename(super::PrepareRenameResult {
-                id: request.id,
-                range: None,
-                err: Some("Not supported".to_string()),
-            })),
-        };
+        }
 
         info!("ON PREPARE RENAME ELAPSED: {:?}", start.elapsed());
 
@@ -1907,23 +2034,35 @@ impl LSPHandlers {
         // by the client
         if !self.can_path_be_modified(document_uri.as_ref()) {
             return Some(LSPResult::Rename(super::RenameResult {
-                id: request.id,
+                id: request.id.clone(),
                 edits: None,
                 err: Some("Cannot rename externally included files".to_string()),
             }));
         }
 
-        let workspace = self.get_workspace_for_uri(document_uri.as_str())?;
+        let workspaces = self.get_workspaces_for_uri(document_uri.as_str());
+        if workspaces.is_empty() {
+            return None;
+        }
 
-        let store = workspace.store.lock().unwrap();
-        let document = store.get::<String>(&document_uri.clone().into())?;
+        let document = {
+            let store = workspaces[0].store.lock().unwrap();
+            store.get::<String>(&document_uri.clone().into())?.clone()
+        };
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
 
         let mut edits: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-        match self.parser.get_position_type(document, position) {
-            parser::PositionType::RootNode => {
+        let mut is_renamed_job_inside_the_project = false;
+
+        let position_type = self.parser.get_position_type(&document, position);
+
+        for workspace in workspaces {
+            let store = workspace.store.lock().unwrap();
+
+            match &position_type {
+                parser::PositionType::RootNode => {
                 let text_edits = edits.entry(document_uri.clone()).or_default();
 
                 let word = parser_utils::ParserUtils::word_before_cursor(
@@ -1942,7 +2081,7 @@ impl LSPHandlers {
 
                 if LSPHandlers::is_predefined_root_element(&full_word) {
                     return Some(LSPResult::Rename(super::RenameResult {
-                        id: request.id,
+                        id: request.id.clone(),
                         edits: None,
                         err: Some("Cannot rename Gitlab elements".to_string()),
                     }));
@@ -1992,77 +2131,89 @@ impl LSPHandlers {
                     ));
                 }
             }
-            parser::PositionType::Extend
-            | parser::PositionType::RuleReference(_)
-            | parser::PositionType::Needs(_) => {
-                let word = parser_utils::ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    |c| c.is_whitespace() || c == '\'' || c == '"',
-                );
+                parser::PositionType::Extend
+                | parser::PositionType::RuleReference(_)
+                | parser::PositionType::Needs(_) => {
+                    let word = parser_utils::ParserUtils::word_before_cursor(
+                        line,
+                        position.character as usize,
+                        |c| c.is_whitespace() || c == '\'' || c == '"',
+                    );
 
-                let after = parser_utils::ParserUtils::word_after_cursor(
-                    line,
-                    position.character as usize,
-                    |c| c.is_whitespace() || c == '\'' || c == '"',
-                );
+                    let after = parser_utils::ParserUtils::word_after_cursor(
+                        line,
+                        position.character as usize,
+                        |c| c.is_whitespace() || c == '\'' || c == '"',
+                    );
 
-                let job = format!("{word}{after}");
+                    let job = format!("{word}{after}");
 
-                let mut is_renamed_job_inside_the_project = false;
+                    for (uri, content) in store.iter() {
+                        if !self.can_path_be_modified(uri) {
+                            continue;
+                        }
 
-                for (uri, content) in store.iter() {
-                    if !self.can_path_be_modified(uri) {
-                        continue;
+                        // TODO: ? should be removed and just skip this entry
+                        let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
+
+                        if let Some(r) = self.rename_root_node(uri, content, &job, &params.new_name) {
+                            is_renamed_job_inside_the_project = true;
+                            text_edits.push(r);
+                        }
+
+                        text_edits.append(&mut self.rename_extends(
+                            uri,
+                            content,
+                            &job,
+                            &params.new_name,
+                        ));
+
+                        text_edits.append(&mut self.rename_needs(
+                            uri,
+                            content,
+                            &job,
+                            &params.new_name,
+                        ));
+
+                        text_edits.append(&mut self.rename_rule_references(
+                            uri,
+                            content,
+                            &job,
+                            &params.new_name,
+                        ));
                     }
-
-                    // TODO: ? should be removed and just skip this entry
-                    let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
-
-                    if let Some(r) = self.rename_root_node(uri, content, &job, &params.new_name) {
-                        is_renamed_job_inside_the_project = true;
-                        text_edits.push(r);
-                    }
-
-                    text_edits.append(&mut self.rename_extends(
-                        uri,
-                        content,
-                        &job,
-                        &params.new_name,
-                    ));
-
-                    text_edits.append(&mut self.rename_needs(uri, content, &job, &params.new_name));
-
-                    text_edits.append(&mut self.rename_rule_references(
-                        uri,
-                        content,
-                        &job,
-                        &params.new_name,
-                    ));
                 }
-
-                // adding this at the bottom because if we are trying to rename some extend that
-                // was declared only in cached files this wont be reached
-                if !is_renamed_job_inside_the_project {
-                    return Some(LSPResult::Rename(super::RenameResult {
-                        id: request.id,
-                        edits: None,
-                        err: Some(
-                            "Cannot rename extend which has definition outside project scope"
-                                .to_string(),
-                        ),
-                    }));
+                _ => {
+                    warn!("invalid type for rename");
                 }
             }
-            _ => {
-                warn!("invalid type for rename");
-            }
+        }
+
+        if !is_renamed_job_inside_the_project
+            && !matches!(position_type, parser::PositionType::RootNode)
+        {
+            return Some(LSPResult::Rename(super::RenameResult {
+                id: request.id.clone(),
+                edits: None,
+                err: Some(
+                    "Cannot rename extend which has definition outside project scope".to_string(),
+                ),
+            }));
+        }
+
+        // Dedup edits
+        for edits_list in edits.values_mut() {
+            let mut seen = HashSet::new();
+            edits_list.retain(|e| {
+                let key = format!("{:?}-{:?}", e.range, e.new_text);
+                seen.insert(key)
+            });
         }
 
         info!("ON RENAME ELAPSED: {:?}", start.elapsed());
 
         Some(LSPResult::Rename(RenameResult {
-            id: request.id,
+            id: request.id.clone(),
             edits: Some(edits),
             err: None,
         }))
@@ -2526,7 +2677,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_workspace_for_uri() {
+    fn test_get_workspaces_for_uri() {
         let cfg = LSPConfig {
             root_dir: "/root".to_string(),
             cache_path: "/cache".to_string(),
@@ -2569,18 +2720,18 @@ mod tests {
         }
 
         // Test finding workspace for file in project1
-        let found1 = handlers.get_workspace_for_uri("file:///root/project1/a.yml");
-        assert!(found1.is_some());
-        assert_eq!(found1.unwrap().root_uri, ws1.root_uri);
+        let found1 = handlers.get_workspaces_for_uri("file:///root/project1/a.yml");
+        assert_eq!(found1.len(), 1);
+        assert_eq!(found1[0].root_uri, ws1.root_uri);
 
         // Test finding workspace for file in project2
-        let found2 = handlers.get_workspace_for_uri("file:///root/project2/b.yml");
-        assert!(found2.is_some());
-        assert_eq!(found2.unwrap().root_uri, ws2.root_uri);
+        let found2 = handlers.get_workspaces_for_uri("file:///root/project2/b.yml");
+        assert_eq!(found2.len(), 1);
+        assert_eq!(found2[0].root_uri, ws2.root_uri);
 
         // Test fallback to first workspace for unknown file
-        let found3 = handlers.get_workspace_for_uri("file:///root/unknown.yml");
-        assert!(found3.is_some());
-        assert_eq!(found3.unwrap().root_uri, ws1.root_uri);
+        let found3 = handlers.get_workspaces_for_uri("file:///root/unknown.yml");
+        assert_eq!(found3.len(), 1);
+        assert_eq!(found3[0].root_uri, ws1.root_uri);
     }
 }
