@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, sync::{Arc, Mutex}, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use anyhow::anyhow;
 use log::{debug, error, info, warn};
@@ -11,8 +17,10 @@ use lsp_types::{
 use regex::Regex;
 
 use crate::gitlab_ci_ls_parser::{
-    parser_utils::ParserUtils, workspace::{Workspace, IndexingState}, DiagnosticsNotification, LspConfiguration, NodeDefinition,
-    PrepareRenameResult, RenameResult, DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
+    parser_utils::ParserUtils,
+    workspace::{IndexingState, Workspace},
+    DiagnosticsNotification, LspConfiguration, NodeDefinition, PrepareRenameResult, RenameResult,
+    DEFAULT_BRANCH_SUBFOLDER, MAX_CACHE_ITEMS,
 };
 
 use super::{
@@ -426,11 +434,9 @@ impl LSPHandlers {
                 | parser::PositionType::Extend
                 | parser::PositionType::Dependency => {
                     let line = document.lines().nth(position.line as usize)?;
-                    let word = parser_utils::ParserUtils::extract_word(
-                        line,
-                        position.character as usize,
-                    )?
-                    .trim_end_matches(':');
+                    let word =
+                        parser_utils::ParserUtils::extract_word(line, position.character as usize)?
+                            .trim_end_matches(':');
 
                     for (uri, content) in store.iter() {
                         if let Some(element) = self.parser.get_root_node(uri, content, word) {
@@ -448,7 +454,7 @@ impl LSPHandlers {
                     }
                 }
                 parser::PositionType::Include(info) => {
-                    if let Some(include) = self.on_definition_include(&workspace, info, &store) {
+                    if let Some(include) = Self::on_definition_include(&workspace, info, &store) {
                         locations.push(include);
                     }
                 }
@@ -493,10 +499,8 @@ impl LSPHandlers {
                 }
                 parser::PositionType::Stage => {
                     let line = document.lines().nth(position.line as usize)?;
-                    let word = parser_utils::ParserUtils::extract_word(
-                        line,
-                        position.character as usize,
-                    )?;
+                    let word =
+                        parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
 
                     if let Some(el) = stages.get(word) {
                         locations.push(LSPLocation {
@@ -571,7 +575,6 @@ impl LSPHandlers {
 
     #[allow(clippy::too_many_lines)]
     fn on_definition_include(
-        &self,
         workspace: &Workspace,
         info: IncludeInformation,
         store: &HashMap<String, String>,
@@ -634,7 +637,8 @@ impl LSPHandlers {
                     .trim_matches('\'')
                     .to_string();
 
-                workspace.components
+                workspace
+                    .components
                     .lock()
                     .unwrap()
                     .values()
@@ -753,7 +757,7 @@ impl LSPHandlers {
         for workspace in workspaces {
             let items = match self.parser.get_position_type(&document, position) {
                 parser::PositionType::Stage => {
-                    self.on_completion_stages(&workspace, line, position).ok()
+                    Self::on_completion_stages(&workspace, line, position).ok()
                 }
                 parser::PositionType::Dependency => self
                     .on_completion_dependencies(
@@ -765,13 +769,13 @@ impl LSPHandlers {
                     )
                     .ok(),
                 parser::PositionType::Extend => {
-                    self.on_completion_extends(&workspace, line, position).ok()
+                    Self::on_completion_extends(&workspace, line, position).ok()
                 }
                 parser::PositionType::Variable => {
-                    self.on_completion_variables(&workspace, line, position).ok()
+                    Self::on_completion_variables(&workspace, line, position).ok()
                 }
                 parser::PositionType::Needs(_) => {
-                    self.on_completion_needs(&workspace, line, position).ok()
+                    Self::on_completion_needs(&workspace, line, position).ok()
                 }
                 parser::PositionType::Include(IncludeInformation {
                     remote: None,
@@ -779,9 +783,7 @@ impl LSPHandlers {
                     local: None,
                     basic: None,
                     component: Some(component),
-                }) => self
-                    .on_completion_component(&workspace, line, position, &component)
-                    .ok(),
+                }) => Self::on_completion_component(&workspace, line, position, &component).ok(),
                 parser::PositionType::Include(IncludeInformation {
                     remote: Some(remote),
                     remote_url: None,
@@ -792,7 +794,7 @@ impl LSPHandlers {
                     .on_completion_remote(&workspace, line, position, &remote)
                     .ok(),
                 parser::PositionType::RuleReference(_) => {
-                    self.on_completion_rule_reference(&workspace, line, position).ok()
+                    Self::on_completion_rule_reference(&workspace, line, position).ok()
                 }
                 _ => None,
             };
@@ -814,7 +816,6 @@ impl LSPHandlers {
     }
 
     fn on_completion_stages(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -994,7 +995,6 @@ impl LSPHandlers {
     }
 
     fn on_completion_extends(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -1050,7 +1050,6 @@ impl LSPHandlers {
     }
 
     fn on_completion_variables(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -1099,7 +1098,6 @@ impl LSPHandlers {
     }
 
     fn on_completion_rule_reference(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -1152,7 +1150,6 @@ impl LSPHandlers {
     }
 
     fn on_completion_needs(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -1251,7 +1248,7 @@ impl LSPHandlers {
 
         // 1. Collect all YAML files for graph building
         let mut all_yaml_files = HashMap::new();
-        let pattern = format!("{}/**/*.y*ml", root_dir);
+        let pattern = format!("{root_dir}/**/*.y*ml");
         if let Ok(paths) = glob::glob(&pattern) {
             for path in paths.flatten() {
                 if let Ok(content) = fs::read_to_string(&path) {
@@ -1343,13 +1340,19 @@ impl LSPHandlers {
                     let file_uri = base_uri_path.join(dir.file_name().to_str().unwrap())?;
                     let file_content = std::fs::read_to_string(dir.path())?;
 
-                    if let Some(results) =
-                        self.parser
-                            .parse_contents(&file_uri, &file_content, &project_root_dir, true)
-                    {
+                    if let Some(results) = self.parser.parse_contents(
+                        &file_uri,
+                        &file_content,
+                        &project_root_dir,
+                        true,
+                    ) {
                         for file in results.files {
                             info!("found file: {:?}", &file);
-                            workspace.files_included.lock().unwrap().insert(file.path.clone());
+                            workspace
+                                .files_included
+                                .lock()
+                                .unwrap()
+                                .insert(file.path.clone());
                             store.insert(file.path, file.content);
                         }
 
@@ -1386,7 +1389,11 @@ impl LSPHandlers {
             {
                 for file in results.files {
                     info!("found file: {:?}", &file);
-                    workspace.files_included.lock().unwrap().insert(file.path.clone());
+                    workspace
+                        .files_included
+                        .lock()
+                        .unwrap()
+                        .insert(file.path.clone());
                     store.insert(file.path, file.content);
                 }
 
@@ -1464,9 +1471,9 @@ impl LSPHandlers {
                 None => continue,
             };
 
-            let extends = self
-                .parser
-                .get_all_extends(document_uri.to_string(), content.as_str(), None);
+            let extends =
+                self.parser
+                    .get_all_extends(document_uri.to_string(), content.as_str(), None);
 
             let mut diagnostics: Vec<Diagnostic> = vec![];
 
@@ -1528,9 +1535,9 @@ impl LSPHandlers {
                 }
             }
 
-            let needs = self
-                .parser
-                .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
+            let needs =
+                self.parser
+                    .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
 
             'needs: for need in needs {
                 let need_split = need.key.split(' ').collect::<Vec<&str>>();
@@ -1701,10 +1708,8 @@ impl LSPHandlers {
 
             match &position_type {
                 parser::PositionType::Extend => {
-                    let word = parser_utils::ParserUtils::extract_word(
-                        line,
-                        position.character as usize,
-                    )?;
+                    let word =
+                        parser_utils::ParserUtils::extract_word(line, position.character as usize)?;
 
                     for (uri, content) in store.iter() {
                         let mut extends =
@@ -1714,18 +1719,18 @@ impl LSPHandlers {
                     }
                 }
                 parser::PositionType::RootNode => {
-                    let word = parser_utils::ParserUtils::extract_word(
-                        line,
-                        position.character as usize,
-                    )?
-                    .trim_end_matches(':');
+                    let word =
+                        parser_utils::ParserUtils::extract_word(line, position.character as usize)?
+                            .trim_end_matches(':');
 
                     // currently support only those that are extends
                     if word.starts_with('.') {
                         for (uri, content) in store.iter() {
-                            let mut extends =
-                                self.parser
-                                    .get_all_extends(uri.clone(), content.as_str(), Some(word));
+                            let mut extends = self.parser.get_all_extends(
+                                uri.clone(),
+                                content.as_str(),
+                                Some(word),
+                            );
                             references.append(&mut extends);
                         }
                     } else {
@@ -1769,7 +1774,6 @@ impl LSPHandlers {
 
     #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
     fn on_completion_component(
-        &self,
         workspace: &Workspace,
         line: &str,
         position: Position,
@@ -2063,74 +2067,74 @@ impl LSPHandlers {
 
             match &position_type {
                 parser::PositionType::RootNode => {
-                let text_edits = edits.entry(document_uri.clone()).or_default();
+                    let text_edits = edits.entry(document_uri.clone()).or_default();
 
-                let word = parser_utils::ParserUtils::word_before_cursor(
-                    line,
-                    position.character as usize,
-                    char::is_whitespace,
-                );
-                let after = parser_utils::ParserUtils::word_after_cursor(
-                    line,
-                    position.character as usize,
-                    char::is_whitespace,
-                )
-                .trim_end_matches(':');
+                    let word = parser_utils::ParserUtils::word_before_cursor(
+                        line,
+                        position.character as usize,
+                        char::is_whitespace,
+                    );
+                    let after = parser_utils::ParserUtils::word_after_cursor(
+                        line,
+                        position.character as usize,
+                        char::is_whitespace,
+                    )
+                    .trim_end_matches(':');
 
-                let full_word = format!("{word}{after}");
+                    let full_word = format!("{word}{after}");
 
-                if LSPHandlers::is_predefined_root_element(&full_word) {
-                    return Some(LSPResult::Rename(super::RenameResult {
-                        id: request.id.clone(),
-                        edits: None,
-                        err: Some("Cannot rename Gitlab elements".to_string()),
-                    }));
-                }
-
-                text_edits.push(TextEdit {
-                    new_text: params.new_name.clone(),
-                    range: lsp_types::Range {
-                        start: Position {
-                            line: position.line,
-                            character: position.character - u32::try_from(word.len()).ok()?,
-                        },
-                        end: Position {
-                            line: position.line,
-                            character: position.character + u32::try_from(after.len()).ok()?,
-                        },
-                    },
-                });
-
-                for (uri, content) in store.iter() {
-                    if !self.can_path_be_modified(uri) {
-                        continue;
+                    if LSPHandlers::is_predefined_root_element(&full_word) {
+                        return Some(LSPResult::Rename(super::RenameResult {
+                            id: request.id.clone(),
+                            edits: None,
+                            err: Some("Cannot rename Gitlab elements".to_string()),
+                        }));
                     }
 
-                    // TODO: ? should be removed and just skip this entry
-                    let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
+                    text_edits.push(TextEdit {
+                        new_text: params.new_name.clone(),
+                        range: lsp_types::Range {
+                            start: Position {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len()).ok()?,
+                            },
+                            end: Position {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len()).ok()?,
+                            },
+                        },
+                    });
 
-                    text_edits.append(&mut self.rename_extends(
-                        uri,
-                        content,
-                        &full_word,
-                        &params.new_name,
-                    ));
+                    for (uri, content) in store.iter() {
+                        if !self.can_path_be_modified(uri) {
+                            continue;
+                        }
 
-                    text_edits.append(&mut self.rename_needs(
-                        uri,
-                        content,
-                        &full_word,
-                        &params.new_name,
-                    ));
+                        // TODO: ? should be removed and just skip this entry
+                        let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
 
-                    text_edits.append(&mut self.rename_rule_references(
-                        uri,
-                        content,
-                        &full_word,
-                        &params.new_name,
-                    ));
+                        text_edits.append(&mut self.rename_extends(
+                            uri,
+                            content,
+                            &full_word,
+                            &params.new_name,
+                        ));
+
+                        text_edits.append(&mut self.rename_needs(
+                            uri,
+                            content,
+                            &full_word,
+                            &params.new_name,
+                        ));
+
+                        text_edits.append(&mut self.rename_rule_references(
+                            uri,
+                            content,
+                            &full_word,
+                            &params.new_name,
+                        ));
+                    }
                 }
-            }
                 parser::PositionType::Extend
                 | parser::PositionType::RuleReference(_)
                 | parser::PositionType::Needs(_) => {
@@ -2156,7 +2160,8 @@ impl LSPHandlers {
                         // TODO: ? should be removed and just skip this entry
                         let text_edits = edits.entry(Url::parse(uri).ok()?).or_default();
 
-                        if let Some(r) = self.rename_root_node(uri, content, &job, &params.new_name) {
+                        if let Some(r) = self.rename_root_node(uri, content, &job, &params.new_name)
+                        {
                             is_renamed_job_inside_the_project = true;
                             text_edits.push(r);
                         }
@@ -2494,13 +2499,13 @@ fn generate_component_diagnostics_from_spec(
 #[cfg(test)]
 mod tests {
     use super::LSPHandlers;
+    use crate::gitlab_ci_ls_parser::{workspace::Workspace, LSPConfig, LSPExperimental};
     use lsp_types::Url;
+    use std::collections::HashMap;
     use std::fs::{self, File};
     use std::path::PathBuf;
-    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tempfile::{tempdir, TempDir};
-    use crate::gitlab_ci_ls_parser::{LSPConfig, LSPExperimental, workspace::Workspace};
 
     // Helper function to create a temporary directory and files within it
     fn setup_test_environment(files_to_create: &[&str], dirs_to_create: &[&str]) -> TempDir {

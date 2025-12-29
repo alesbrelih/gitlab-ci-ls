@@ -70,21 +70,21 @@ job1:
 
     #[test]
     fn test_is_gitlab_ci_file_include() {
-        let content = r#"
+        let content = r"
 include:
   - local: 'configs/base.yml'
-"#;
+";
         assert!(is_gitlab_ci_file(content));
     }
 
     #[test]
     fn test_is_gitlab_ci_file_ansible() {
-        let content = r#"
+        let content = r"
 - name: Update all packages
   yum:
     name: '*'
     state: latest
-"#;
+";
         assert!(!is_gitlab_ci_file(content));
     }
 
@@ -102,7 +102,7 @@ tasks:
 
     #[test]
     fn test_is_gitlab_ci_file_k8s() {
-        let content = r#"
+        let content = r"
 apiVersion: v1
 kind: Pod
 metadata:
@@ -111,7 +111,7 @@ spec:
   containers:
   - name: nginx
     image: nginx:1.14.2
-"#;
+";
         assert!(!is_gitlab_ci_file(content));
     }
 

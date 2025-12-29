@@ -4,9 +4,6 @@ use lsp_types::Url;
 
 use super::{GitlabElement, GitlabFileElements, Component};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WorkspaceId(pub String);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexingState {
     New,
@@ -17,7 +14,6 @@ pub enum IndexingState {
 
 #[derive(Debug)]
 pub struct Workspace {
-    pub id: WorkspaceId,
     pub root_uri: Url,
     pub files_included: Mutex<HashSet<String>>,
     pub indexing_state: Mutex<IndexingState>,
@@ -33,9 +29,7 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(root_uri: Url) -> Self {
-        let id = WorkspaceId(root_uri.as_str().to_string());
         Workspace {
-            id,
             root_uri,
             files_included: Mutex::new(HashSet::new()),
             indexing_state: Mutex::new(IndexingState::New),
@@ -59,16 +53,20 @@ mod tests {
         let root_uri = Url::parse("file:///root/.gitlab-ci.yml").unwrap();
         let workspace = Workspace::new(root_uri.clone());
 
-        assert_eq!(workspace.id, WorkspaceId(root_uri.as_str().to_string()));
         assert_eq!(workspace.root_uri, root_uri);
         assert!(workspace.files_included.lock().unwrap().is_empty());
         assert_eq!(*workspace.indexing_state.lock().unwrap(), IndexingState::New);
         assert!(workspace.store.lock().unwrap().is_empty());
+           
+        
         assert!(workspace.nodes.lock().unwrap().is_empty());
         assert!(workspace.nodes_ordered_list.lock().unwrap().is_empty());
-        assert!(workspace.stages.lock().unwrap().is_empty());
         assert!(workspace.stages_ordered_list.lock().unwrap().is_empty());
         assert!(workspace.variables.lock().unwrap().is_empty());
         assert!(workspace.components.lock().unwrap().is_empty());
     }
 }
+
+
+
+

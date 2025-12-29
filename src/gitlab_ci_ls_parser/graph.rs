@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use lsp_types::Url;
-use super::IncludeItem;
 use super::fingerprint::is_gitlab_ci_file;
+use super::IncludeItem;
+use lsp_types::Url;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
 pub struct ProjectGraph {
@@ -30,9 +30,8 @@ pub fn build_graph(files: &HashMap<String, String>) -> ProjectGraph {
     let mut graph = ProjectGraph::new();
 
     for (uri_str, content) in files {
-        let uri = match Url::parse(uri_str) {
-            Ok(u) => u,
-            Err(_) => continue,
+        let Ok(uri) = Url::parse(uri_str) else {
+            continue;
         };
 
         let yaml: serde_yaml::Value = match serde_yaml::from_str(content) {
@@ -89,7 +88,7 @@ pub fn find_roots(graph: &ProjectGraph, files: &HashMap<String, String>) -> Vec<
             let is_included = graph
                 .included_by
                 .get(uri_str)
-                .map_or(false, |parents| !parents.is_empty());
+                .is_some_and(|parents| !parents.is_empty());
 
             if !is_included {
                 roots.push(uri_str.clone());
@@ -112,11 +111,16 @@ mod tests {
             "file:///root/.gitlab-ci.yml".to_string(),
             "include:\n  - local: 'common.yml'".to_string(),
         );
-        files.insert("file:///root/common.yml".to_string(), "job: { script: 'ls' }".to_string());
+        files.insert(
+            "file:///root/common.yml".to_string(),
+            "job: { script: 'ls' }".to_string(),
+        );
 
         let graph = build_graph(&files);
         assert!(graph.includes["file:///root/.gitlab-ci.yml"].contains("file:///root/common.yml"));
-        assert!(graph.included_by["file:///root/common.yml"].contains("file:///root/.gitlab-ci.yml"));
+        assert!(
+            graph.included_by["file:///root/common.yml"].contains("file:///root/.gitlab-ci.yml")
+        );
     }
 
     #[test]
@@ -126,12 +130,18 @@ mod tests {
             "file:///root/.gitlab-ci.yml".to_string(),
             "include: 'common.yml'".to_string(),
         );
-        files.insert("file:///root/common.yml".to_string(), "job: { script: 'ls' }".to_string());
+        files.insert(
+            "file:///root/common.yml".to_string(),
+            "job: { script: 'ls' }".to_string(),
+        );
         files.insert(
             "file:///root/template.yml".to_string(),
             "job_template: { script: 'echo' }".to_string(),
         );
-        files.insert("file:///root/random.txt".to_string(), "hello world".to_string());
+        files.insert(
+            "file:///root/random.txt".to_string(),
+            "hello world".to_string(),
+        );
 
         let graph = build_graph(&files);
         let roots = find_roots(&graph, &files);
