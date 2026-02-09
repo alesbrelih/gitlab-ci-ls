@@ -67,7 +67,7 @@
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.49.0",
     "esbuild": "^0.27.1",
-    "eslint": "^9.39.2",
+    "eslint": "^10.0.0",
     "mocha": "^11.7.5",
     "typescript": "^5.9.3"
   }
