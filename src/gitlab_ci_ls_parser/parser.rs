@@ -380,6 +380,13 @@ impl ParserImpl {
             }
         };
 
+        // Parse job definitions from the component template (content after ---)
+        if let Some(jobs_content) = ParserUtils::get_component_jobs_content(&spec_content) {
+            parse_results.nodes.append(
+                &mut self.treesitter.get_all_root_nodes(&gitlab_component.key, &jobs_content),
+            );
+        }
+
         parse_results.components.push(Component {
             uri: component_id.to_string(),
             local_path: gitlab_component.uri,
