@@ -729,7 +729,7 @@ impl Parser for ParserImpl {
 #[cfg(test)]
 mod tests {
     use fs_utils::MockFSUtils;
-    use treesitter::TreesitterImpl;
+    use treesitter::{Treesitter, TreesitterImpl};
 
     use super::*;
 
@@ -1052,5 +1052,43 @@ mod tests {
 ";
 
         assert_eq!(full_definition.unwrap(), want);
+    }
+
+    #[test]
+    fn test_component_jobs_extracted_as_nodes() {
+        // Simulates the exact code path in parse_component():
+        // full component template → get_component_jobs_content → get_all_root_nodes
+        let component_template = r#"spec:
+  inputs:
+    env:
+      default: production
+---
+.component_job:
+  variables:
+    ENV: production
+  script: echo deploy
+
+.component_helper:
+  before_script: echo setup
+"#;
+
+        let jobs_content = ParserUtils::get_component_jobs_content(component_template);
+        assert!(jobs_content.is_some(), "Should extract jobs after ---");
+
+        let treesitter = TreesitterImpl::new();
+        let nodes = treesitter.get_all_root_nodes(
+            "file:///tmp/component-template.yml",
+            &jobs_content.unwrap(),
+        );
+
+        let keys: Vec<&str> = nodes.iter().map(|n| n.key.as_str()).collect();
+        assert_eq!(keys.len(), 2, "Expected 2 nodes, got: {:?}", keys);
+        assert!(keys.contains(&".component_job"), "Missing .component_job in {:?}", keys);
+        assert!(keys.contains(&".component_helper"), "Missing .component_helper in {:?}", keys);
+
+        // Verify URI is propagated correctly (used for diagnostics/navigation)
+        for node in &nodes {
+            assert_eq!(node.uri, "file:///tmp/component-template.yml");
+        }
     }
 }
