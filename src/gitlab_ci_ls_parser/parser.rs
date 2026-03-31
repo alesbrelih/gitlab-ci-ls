@@ -383,7 +383,9 @@ impl ParserImpl {
         // Parse job definitions from the component template (content after ---)
         if let Some(jobs_content) = ParserUtils::get_component_jobs_content(&spec_content) {
             parse_results.nodes.append(
-                &mut self.treesitter.get_all_root_nodes(&gitlab_component.key, &jobs_content),
+                &mut self
+                    .treesitter
+                    .get_all_root_nodes(&gitlab_component.key, &jobs_content),
             );
         }
 
@@ -1076,15 +1078,21 @@ mod tests {
         assert!(jobs_content.is_some(), "Should extract jobs after ---");
 
         let treesitter = TreesitterImpl::new();
-        let nodes = treesitter.get_all_root_nodes(
-            "file:///tmp/component-template.yml",
-            &jobs_content.unwrap(),
-        );
+        let nodes = treesitter
+            .get_all_root_nodes("file:///tmp/component-template.yml", &jobs_content.unwrap());
 
         let keys: Vec<&str> = nodes.iter().map(|n| n.key.as_str()).collect();
         assert_eq!(keys.len(), 2, "Expected 2 nodes, got: {:?}", keys);
-        assert!(keys.contains(&".component_job"), "Missing .component_job in {:?}", keys);
-        assert!(keys.contains(&".component_helper"), "Missing .component_helper in {:?}", keys);
+        assert!(
+            keys.contains(&".component_job"),
+            "Missing .component_job in {:?}",
+            keys
+        );
+        assert!(
+            keys.contains(&".component_helper"),
+            "Missing .component_helper in {:?}",
+            keys
+        );
 
         // Verify URI is propagated correctly (used for diagnostics/navigation)
         for node in &nodes {
