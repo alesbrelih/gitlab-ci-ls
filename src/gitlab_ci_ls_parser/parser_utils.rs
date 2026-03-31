@@ -413,8 +413,15 @@ mod tests {
         let jobs = ParserUtils::get_component_jobs_content(content);
         assert!(jobs.is_some());
         let jobs = jobs.unwrap();
-        assert!(jobs.contains(".my_job:"), "Expected .my_job in jobs content, got: {}", jobs);
-        assert!(!jobs.contains("spec:"), "Jobs content should not contain spec");
+        assert!(
+            jobs.contains(".my_job:"),
+            "Expected .my_job in jobs content, got: {}",
+            jobs
+        );
+        assert!(
+            !jobs.contains("spec:"),
+            "Jobs content should not contain spec"
+        );
     }
 
     #[test]

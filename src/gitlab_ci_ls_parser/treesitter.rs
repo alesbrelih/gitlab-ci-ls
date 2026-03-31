@@ -2408,7 +2408,15 @@ job_one:
         let nodes = treesitter.get_all_root_nodes("file://component-template", content);
 
         let keys: Vec<&str> = nodes.iter().map(|n| n.key.as_str()).collect();
-        assert!(keys.contains(&".my_job"), "Expected .my_job in nodes, got: {:?}", keys);
-        assert!(keys.contains(&".another_job"), "Expected .another_job in nodes, got: {:?}", keys);
+        assert!(
+            keys.contains(&".my_job"),
+            "Expected .my_job in nodes, got: {:?}",
+            keys
+        );
+        assert!(
+            keys.contains(&".another_job"),
+            "Expected .another_job in nodes, got: {:?}",
+            keys
+        );
     }
 }
