@@ -244,6 +244,20 @@ impl ParserUtils {
         })
     }
 
+    /// Extracts the content after the YAML document separator `---` in a component template.
+    /// Returns None if there is no separator or no meaningful content after it.
+    pub fn get_component_jobs_content(content: &str) -> Option<String> {
+        let separator = "\n---\n";
+        let idx = content.find(separator)?;
+        let after = content[idx + separator.len()..].trim();
+
+        if after.is_empty() {
+            return None;
+        }
+
+        Some(after.to_string())
+    }
+
     pub(crate) fn is_glob(uri: &str) -> bool {
         // TODO: kinda should work?
         uri.contains('*')
@@ -384,6 +398,44 @@ mod tests {
         let result = ParserUtils::extract_word(line, char_index);
         // This should work with the fix
         assert_eq!(result, Some("🚀"));
+    }
+
+    #[test]
+    fn test_split_component_content_returns_jobs_after_separator() {
+        let content = r#"spec:
+  inputs: {}
+---
+.my_job:
+  variables:
+    FOO: bar
+"#;
+
+        let jobs = ParserUtils::get_component_jobs_content(content);
+        assert!(jobs.is_some());
+        let jobs = jobs.unwrap();
+        assert!(jobs.contains(".my_job:"), "Expected .my_job in jobs content, got: {}", jobs);
+        assert!(!jobs.contains("spec:"), "Jobs content should not contain spec");
+    }
+
+    #[test]
+    fn test_split_component_content_no_separator() {
+        let content = r#"spec:
+  inputs: {}
+"#;
+
+        let jobs = ParserUtils::get_component_jobs_content(content);
+        assert!(jobs.is_none());
+    }
+
+    #[test]
+    fn test_split_component_content_empty_after_separator() {
+        let content = r#"spec:
+  inputs: {}
+---
+"#;
+
+        let jobs = ParserUtils::get_component_jobs_content(content);
+        assert!(jobs.is_none());
     }
 
     #[test]
