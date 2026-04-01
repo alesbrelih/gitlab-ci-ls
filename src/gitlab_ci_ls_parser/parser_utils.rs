@@ -402,21 +402,14 @@ mod tests {
 
     #[test]
     fn test_split_component_content_returns_jobs_after_separator() {
-        let content = r#"spec:
-  inputs: {}
----
-.my_job:
-  variables:
-    FOO: bar
-"#;
+        let content = "spec:\n  inputs: {}\n---\n.my_job:\n  variables:\n    FOO: bar\n";
 
         let jobs = ParserUtils::get_component_jobs_content(content);
         assert!(jobs.is_some());
         let jobs = jobs.unwrap();
         assert!(
             jobs.contains(".my_job:"),
-            "Expected .my_job in jobs content, got: {}",
-            jobs
+            "Expected .my_job in jobs content, got: {jobs}",
         );
         assert!(
             !jobs.contains("spec:"),
@@ -426,9 +419,7 @@ mod tests {
 
     #[test]
     fn test_split_component_content_no_separator() {
-        let content = r#"spec:
-  inputs: {}
-"#;
+        let content = "spec:\n  inputs: {}\n";
 
         let jobs = ParserUtils::get_component_jobs_content(content);
         assert!(jobs.is_none());
@@ -436,10 +427,7 @@ mod tests {
 
     #[test]
     fn test_split_component_content_empty_after_separator() {
-        let content = r#"spec:
-  inputs: {}
----
-"#;
+        let content = "spec:\n  inputs: {}\n---\n";
 
         let jobs = ParserUtils::get_component_jobs_content(content);
         assert!(jobs.is_none());
