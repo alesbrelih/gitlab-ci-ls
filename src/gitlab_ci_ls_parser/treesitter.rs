@@ -2392,7 +2392,7 @@ job_one:
 
     #[test]
     fn test_get_all_root_nodes_after_document_separator() {
-        let content = r#"
+        let content = r"
 .my_job:
   variables:
     FOO: bar
@@ -2402,7 +2402,7 @@ job_one:
   extends: .my_job
   variables:
     BAZ: qux
-"#;
+";
 
         let treesitter = TreesitterImpl::new();
         let nodes = treesitter.get_all_root_nodes("file://component-template", content);
@@ -2410,13 +2410,11 @@ job_one:
         let keys: Vec<&str> = nodes.iter().map(|n| n.key.as_str()).collect();
         assert!(
             keys.contains(&".my_job"),
-            "Expected .my_job in nodes, got: {:?}",
-            keys
+            "Expected .my_job in nodes, got: {keys:?}",
         );
         assert!(
             keys.contains(&".another_job"),
-            "Expected .another_job in nodes, got: {:?}",
-            keys
+            "Expected .another_job in nodes, got: {keys:?}",
         );
     }
 }
