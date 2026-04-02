@@ -123,8 +123,8 @@ impl TreesitterQueries {
 
     pub fn get_all_stages(stage: Option<&str>) -> String {
         let mut search = String::new();
-        if stage.is_some() {
-            search = format!("(#eq? @value \"{}\")", stage.unwrap());
+        if let Some(s) = stage {
+            search = format!("(#eq? @value \"{s}\")");
         }
 
         format!(
