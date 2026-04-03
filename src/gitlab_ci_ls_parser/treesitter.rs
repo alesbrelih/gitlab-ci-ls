@@ -2389,4 +2389,32 @@ job_one:
         assert_eq!(1, all_multi_caches.len());
         assert_eq!(2, all_multi_caches[0].cache_items.len());
     }
+
+    #[test]
+    fn test_get_all_root_nodes_after_document_separator() {
+        let content = r"
+.my_job:
+  variables:
+    FOO: bar
+  script: echo hello
+
+.another_job:
+  extends: .my_job
+  variables:
+    BAZ: qux
+";
+
+        let treesitter = TreesitterImpl::new();
+        let nodes = treesitter.get_all_root_nodes("file://component-template", content);
+
+        let keys: Vec<&str> = nodes.iter().map(|n| n.key.as_str()).collect();
+        assert!(
+            keys.contains(&".my_job"),
+            "Expected .my_job in nodes, got: {keys:?}",
+        );
+        assert!(
+            keys.contains(&".another_job"),
+            "Expected .another_job in nodes, got: {keys:?}",
+        );
+    }
 }
