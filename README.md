@@ -43,12 +43,12 @@ For projects that do not have a standard `.gitlab-ci.yml` file at their root (e.
 
 The `.gitlab-ci-ls.yml` file should contain a `root_files` key, which is a list of paths to your main GitLab CI files. These paths can be:
 
--   **Individual files**: Direct paths to `.gitlab-ci.yml` or `.gitlab-ci.yaml` files.
-    Example: `["path/to/my-pipeline.gitlab-ci.yml"]`
--   **Directories**: The language server will recursively search for `.gitlab-ci.yml` or `.gitlab-ci.yaml` files within the specified directories.
-    Example: `["pipelines/"]`
--   **Glob patterns**: Patterns that match multiple GitLab CI files.
-    Example: `["templates/**/*.gitlab-ci.yml"]`
+- **Individual files**: Direct paths to `.gitlab-ci.yml` or `.gitlab-ci.yaml` files.
+  Example: `["path/to/my-pipeline.gitlab-ci.yml"]`
+- **Directories**: The language server will recursively search for `.gitlab-ci.yml` or `.gitlab-ci.yaml` files within the specified directories.
+  Example: `["pipelines/"]`
+- **Glob patterns**: Patterns that match multiple GitLab CI files.
+  Example: `["templates/**/*.gitlab-ci.yml"]`
 
 You can combine these types in a single list to cover all your root CI files.
 
@@ -64,13 +64,14 @@ root_files:
 
 ## Installation
 
-**Hint:** On Linux you have to install the package `libssl-dev` (On Debian based distributions) respectively `openssl-devel` (On RedHat based distributions) when you use Cargo or Mason installation.
+**Hint:** On Linux you have to install the package `libssl-dev` and `pkg-config` (On Debian based distributions)
+respectively `openssl-devel` and `pkgconf` (On RedHat based distributions) when you use Cargo or Mason installation.
 
 1. **GitHub Releases**: Download from the [GitHub releases page](https://github.com/alesbrelih/gitlab-ci-ls/releases).
-2. **Homebrew (macOS/Linux)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls`
-3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls`
+2. **Homebrew (macOS/Linux)**: `brew install alesbrelih/gitlab-ci-ls/gitlab-ci-ls` **Hint:** Since Homebrew version 6 you have to trust 3rd party taps.
+3. **Cargo (Rust Package Manager)**: `cargo install gitlab-ci-ls` **Hint:** You may have to add `$HOME/.cargo/bin` to your `$PATH` env var.
 4. **Mason (neovim)**: [Github](https://github.com/williamboman/mason.nvim)
-5. **Zed integration**: [Zed extension](https://zed.dev/extensions?query=gitlab-ci-ls) You still have to install a binary.
+5. **Zed integration**: [Zed extension](https://zed.dev/extensions?query=gitlab-ci-ls) **Hint:** You still have to install a binary.
 
 ## Build from source
 
