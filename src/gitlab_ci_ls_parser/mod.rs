@@ -171,6 +171,7 @@ pub struct LSPConfig {
     pub cache_path: String,
     pub package_map: HashMap<String, String>,
     pub remote_urls: Vec<String>,
+    pub variables: HashMap<String, String>,
     pub experimental: LSPExperimental,
 }
 

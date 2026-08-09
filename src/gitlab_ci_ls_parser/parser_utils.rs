@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 
 use super::GitlabElement;
@@ -304,6 +305,27 @@ impl ParserUtils {
 
         results
     }
+
+    // Expands $VAR and ${VAR} using the given variables map, falling back to
+    // process environment variables. Unknown variables are left untouched.
+    pub fn expand_variables(input: &str, variables: &HashMap<String, String>) -> String {
+        let re = regex::Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+            .expect("Invalid REGEX");
+
+        re.replace_all(input, |caps: &regex::Captures| {
+            let name = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .expect("one group always matches")
+                .as_str();
+
+            match variables.get(name) {
+                Some(value) => value.clone(),
+                None => env::var(name).unwrap_or_else(|_| caps[0].to_string()),
+            }
+        })
+        .to_string()
+    }
 }
 
 #[cfg(test)]
@@ -441,5 +463,53 @@ mod tests {
         let adjusted = ParserUtils::adjust_to_char_boundary(line, char_idx);
 
         assert_eq!(adjusted, char_idx);
+    }
+
+    #[test]
+    fn test_expand_variables_from_map() {
+        let variables = HashMap::from([(
+            "_GITLAB_TEMPLATES_REPO".to_string(),
+            "project/gitlab_templates".to_string(),
+        )]);
+
+        assert_eq!(
+            ParserUtils::expand_variables("$_GITLAB_TEMPLATES_REPO", &variables),
+            "project/gitlab_templates"
+        );
+        assert_eq!(
+            ParserUtils::expand_variables("${_GITLAB_TEMPLATES_REPO}", &variables),
+            "project/gitlab_templates"
+        );
+    }
+
+    #[test]
+    fn test_expand_variables_from_environment() {
+        with_var("EXPAND_TEST_REF", Some("main"), || {
+            assert_eq!(
+                ParserUtils::expand_variables("$EXPAND_TEST_REF", &HashMap::new()),
+                "main"
+            );
+        });
+    }
+
+    #[test]
+    fn test_expand_variables_map_wins_over_environment() {
+        with_var("EXPAND_TEST_REF", Some("from-env"), || {
+            let variables =
+                HashMap::from([("EXPAND_TEST_REF".to_string(), "from-map".to_string())]);
+
+            assert_eq!(
+                ParserUtils::expand_variables("$EXPAND_TEST_REF", &variables),
+                "from-map"
+            );
+        });
+    }
+
+    #[test]
+    fn test_expand_variables_unknown_left_untouched() {
+        assert_eq!(
+            ParserUtils::expand_variables("$THIS_IS_NOT_DEFINED_ANYWHERE/x", &HashMap::new()),
+            "$THIS_IS_NOT_DEFINED_ANYWHERE/x"
+        );
     }
 }
