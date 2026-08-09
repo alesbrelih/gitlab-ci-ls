@@ -69,6 +69,7 @@ impl LSPHandlers {
             parser: Box::new(parser::ParserImpl::new(
                 cfg.remote_urls,
                 cfg.package_map,
+                cfg.variables,
                 cfg.cache_path,
                 Box::new(treesitter::TreesitterImpl::new()),
                 fs_utils,
@@ -572,11 +573,20 @@ impl LSPHandlers {
             } => {
                 let file = remote.file?;
                 let file = parser_utils::ParserUtils::strip_quotes(&file).trim_start_matches('/');
+                let project = parser_utils::ParserUtils::expand_variables(
+                    &remote.project?,
+                    &self.cfg.variables,
+                );
 
                 let path = if let Some(reference) = remote.reference {
-                    format!("{}/{}/{}", remote.project?, reference, file)
+                    let reference = parser_utils::ParserUtils::expand_variables(
+                        &reference,
+                        &self.cfg.variables,
+                    );
+
+                    format!("{project}/{reference}/{file}")
                 } else {
-                    format!("{}/{}/{}", remote.project?, DEFAULT_BRANCH_SUBFOLDER, file)
+                    format!("{project}/{DEFAULT_BRANCH_SUBFOLDER}/{file}")
                 };
 
                 store
@@ -2182,7 +2192,10 @@ impl LSPHandlers {
                 c.is_whitespace() || c == '"' || c == '\'' || c == '/' || c == '\\'
             });
 
+        let project = ParserUtils::expand_variables(project, &self.cfg.variables);
         let path = if let Some(reference) = &remote.reference {
+            let reference = ParserUtils::expand_variables(reference, &self.cfg.variables);
+
             format!("{project}/{reference}/")
         } else {
             format!("{project}/{DEFAULT_BRANCH_SUBFOLDER}/")

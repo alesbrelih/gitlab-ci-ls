@@ -77,6 +77,7 @@ pub trait Parser: Sync {
 #[allow(clippy::module_name_repetitions)]
 pub struct ParserImpl {
     treesitter: Box<dyn treesitter::Treesitter>,
+    variables: HashMap<String, String>,
     git: Box<dyn git::Git>,
 }
 
@@ -98,12 +99,14 @@ impl ParserImpl {
     pub fn new(
         remote_urls: Vec<String>,
         package_map: HashMap<String, String>,
+        variables: HashMap<String, String>,
         cache_path: String,
         treesitter: Box<dyn treesitter::Treesitter>,
         fs_utils: Box<dyn fs_utils::FSUtils>,
     ) -> ParserImpl {
         ParserImpl {
             treesitter,
+            variables,
             git: Box::new(git::GitImpl::new(
                 remote_urls,
                 package_map,
@@ -545,9 +548,14 @@ impl Parser for ParserImpl {
                         }
                     }
                     IncludeItem::Project(node) => {
+                        let project = ParserUtils::expand_variables(&node.project, &self.variables);
+                        let reference = node
+                            .reference
+                            .map(|r| ParserUtils::expand_variables(&r, &self.variables));
+
                         let remote_files = match self.git.fetch_remote_repository(
-                            node.project.as_str(),
-                            node.reference.as_deref(),
+                            project.as_str(),
+                            reference.as_deref(),
                             node.file,
                         ) {
                             Ok(rf) => rf,
@@ -741,6 +749,7 @@ mod tests {
         let parser = ParserImpl::new(
             vec![],
             HashMap::new(),
+            HashMap::new(),
             String::new(),
             Box::new(TreesitterImpl::new()),
             Box::new(MockFSUtils::new()),
@@ -920,6 +929,7 @@ mod tests {
     fn test_get_full_definition() {
         let parser = ParserImpl::new(
             vec![],
+            HashMap::new(),
             HashMap::new(),
             String::new(),
             Box::new(TreesitterImpl::new()),

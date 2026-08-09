@@ -34,6 +34,26 @@ Initialization options:
 
 - **cache**: location for cached remote files
 - **log_path**: location for LS log
+- **variables**: map of CI variable names to values, used to expand `$VAR`/`${VAR}` occurrences in `include:` `project:` and `ref:` values. Variables not present in the map fall back to the process environment; unknown variables are left untouched. This is needed when includes are parameterized through instance- or group-level CI variables that only exist on the GitLab server. For example, every project on drupal.org's GitLab uses:
+
+  ```yaml
+  include:
+    - project: $_GITLAB_TEMPLATES_REPO
+      ref: $_GITLAB_TEMPLATES_REF
+      file: "/includes/include.drupalci.main.yml"
+  ```
+
+  which resolves with:
+
+  ```json
+  {
+    "variables": {
+      "_GITLAB_TEMPLATES_REPO": "project/gitlab_templates",
+      "_GITLAB_TEMPLATES_REF": "default-ref"
+    }
+  }
+  ```
+
 - **options**:
   - **dependencies_autocomplete_stage_filtering**: Items in dependencies options has to be from previous or current stage. This opption enables dependencies autocomplete result filtering by job stages. It is currently set as opt-in because it takes a longer time (cca 800ms on test repo - medium size) when stages aren't defined in root job because language server needs to first build whole job definition (merging extends) before it can check if job is a valid one. Defaults to `false`
 

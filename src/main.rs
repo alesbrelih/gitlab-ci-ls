@@ -32,6 +32,9 @@ struct InitializationOptions {
     #[serde(default = "default_package_map")]
     package_map: HashMap<String, String>,
 
+    #[serde(default = "default_variables")]
+    variables: HashMap<String, String>,
+
     #[serde(default = "default_log_path")]
     log_path: String,
 
@@ -83,6 +86,7 @@ fn default_options() -> Options {
 fn default_initialization_options() -> InitializationOptions {
     InitializationOptions {
         package_map: default_package_map(),
+        variables: default_variables(),
         log_path: default_log_path(),
         cache_path: default_cache_path(),
         options: default_options(),
@@ -94,6 +98,10 @@ fn default_dependencies_autocomplete_stage_filtering() -> bool {
 }
 
 fn default_package_map() -> HashMap<String, String> {
+    HashMap::new()
+}
+
+fn default_variables() -> HashMap<String, String> {
     HashMap::new()
 }
 
@@ -167,6 +175,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     initialization_options: InitializationOptions {
                         log_path: default_log_path(),
                         package_map: HashMap::new(),
+                        variables: HashMap::new(),
                         cache_path: default_cache_path(),
                         options: Options {
                             dependencies_autocomplete_stage_filtering:
@@ -211,6 +220,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 .to_string_lossy()
                 .to_string(),
             package_map: init_params.initialization_options.package_map.clone(),
+            variables: init_params.initialization_options.variables.clone(),
             remote_urls,
             root_dir: init_params.get_root().clone(),
             experimental: LSPExperimental {
