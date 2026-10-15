@@ -4,10 +4,12 @@ use std::{
     io::Write,
     path::{self, Path},
     process::Command,
-    time::Duration,
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use super::{
+    components,
     fs_utils::{self, FSUtils},
     parser_utils::{self, ComponentInfo, ParserUtils},
     GitlabElement, GitlabFile, ProjectFile, DEFAULT_BRANCH_SUBFOLDER,
@@ -37,7 +39,12 @@ pub struct GitImpl {
     remote_urls: Vec<String>,
     cache_path: String,
     fs_utils: Box<dyn FSUtils>,
+    // Components are resolved on every document change; remember failures for a while so
+    // an unreachable component doesn't trigger network calls on every keystroke.
+    failed_components: Mutex<HashMap<String, Instant>>,
 }
+
+const COMPONENT_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
 impl GitImpl {
     pub fn new(
@@ -51,6 +58,7 @@ impl GitImpl {
             remote_urls,
             cache_path,
             fs_utils,
+            failed_components: Mutex::new(HashMap::new()),
         }
     }
 
@@ -84,7 +92,11 @@ impl GitImpl {
         !(GitImpl::is_valid_semver(s) || GitImpl::is_valid_commit_hash(s))
     }
 
-    fn clone_component_repo(repo_dest: &str, component_info: &ComponentInfo) {
+    fn clone_component_repo(
+        repo_dest: &str,
+        component_info: &ComponentInfo,
+        clone_urls: &[String],
+    ) -> anyhow::Result<()> {
         let repo_dest_path = std::path::Path::new(&repo_dest);
 
         info!("repo_path: {}", repo_dest_path.display());
@@ -93,42 +105,133 @@ impl GitImpl {
             let mut repo_contents = match repo_dest_path.read_dir() {
                 Ok(contents) => contents,
                 Err(err) => {
-                    error!("error reading repo contents; got err: {err}");
-                    return;
+                    return Err(anyhow::anyhow!(
+                        "error reading repo contents; got err: {err}"
+                    ));
                 }
             };
 
             if repo_contents.next().is_some() {
                 info!("repo contents exist");
 
-                return;
+                return Ok(());
             }
         }
 
-        match Command::new("git")
-            .args([
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                &component_info.version,
-                format!("git@{}:{}", component_info.host, component_info.project).as_str(),
-                repo_dest,
-            ])
-            .output()
-        {
-            Ok(ok) => {
-                info!("successfully cloned to : {repo_dest}; got: {ok:?}");
-            }
-            Err(err) => {
-                error!("error cloning to: {repo_dest}, got: {err:?}");
+        let mut errors = vec![];
+        for clone_url in clone_urls {
+            let result = if components::is_partial_version(&component_info.version) {
+                GitImpl::list_remote_tags(clone_url).and_then(|tags| {
+                    let Some(version) = components::resolve_version(&component_info.version, &tags)
+                    else {
+                        return Err(anyhow::anyhow!(
+                            "no tag matches version {}",
+                            component_info.version
+                        ));
+                    };
 
-                let dest = path::Path::new(repo_dest);
-                if dest.exists() {
-                    fs::remove_dir_all(dest).expect("should be able to remove");
+                    info!(
+                        "resolved component version {} to {version}",
+                        component_info.version
+                    );
+                    GitImpl::clone_ref(clone_url, &version, repo_dest)
+                })
+            } else if GitImpl::is_valid_commit_hash(&component_info.version) {
+                GitImpl::fetch_commit(clone_url, &component_info.version, repo_dest)
+            } else {
+                GitImpl::clone_ref(clone_url, &component_info.version, repo_dest)
+            };
+
+            match result {
+                Ok(()) => {
+                    info!("successfully cloned {clone_url} to: {repo_dest}");
+                    return Ok(());
+                }
+                Err(err) => {
+                    error!("error cloning {clone_url} to: {repo_dest}; got: {err}");
+                    errors.push(format!("{clone_url}: {err}"));
+
+                    // leave an empty directory so the next attempt starts from scratch
+                    if repo_dest_path.exists() {
+                        let _ = fs::remove_dir_all(repo_dest_path);
+                        let _ = fs::create_dir_all(repo_dest_path);
+                    }
                 }
             }
         }
+
+        Err(anyhow::anyhow!(
+            "could not clone component repository; tried: {}",
+            errors.join("; ")
+        ))
+    }
+
+    fn run_git(args: &[&str]) -> anyhow::Result<String> {
+        let output = Command::new("git")
+            .args(args)
+            // never block the language server waiting for credentials
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()?;
+
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "git {} failed: {}",
+                args.first().unwrap_or(&""),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn list_remote_tags(clone_url: &str) -> anyhow::Result<Vec<String>> {
+        let output = GitImpl::run_git(&["ls-remote", "--tags", "--refs", clone_url])?;
+
+        Ok(components::parse_ls_remote_tags(&output))
+    }
+
+    fn clone_ref(clone_url: &str, reference: &str, repo_dest: &str) -> anyhow::Result<()> {
+        GitImpl::run_git(&[
+            "clone", "--depth", "1", "--branch", reference, clone_url, repo_dest,
+        ])
+        .map(|_| ())
+    }
+
+    fn fetch_commit(clone_url: &str, sha: &str, repo_dest: &str) -> anyhow::Result<()> {
+        GitImpl::run_git(&["init", "--quiet", repo_dest])?;
+        GitImpl::run_git(&["-C", repo_dest, "fetch", "--depth", "1", clone_url, sha])?;
+        GitImpl::run_git(&["-C", repo_dest, "checkout", "--quiet", "FETCH_HEAD"])?;
+
+        Ok(())
+    }
+
+    /// Possible clone URLs for the component project, most specific first.
+    fn component_clone_urls(&self, component_info: &ComponentInfo) -> Vec<String> {
+        let project = &component_info.project;
+        let mut urls = vec![];
+
+        if let Some(origin) = self.package_map.get(project) {
+            urls.push(format!("{origin}{project}"));
+        }
+
+        // reuse the way the workspace talks to the same host (ssh port, user, https...)
+        for origin in &self.remote_urls {
+            if ParserUtils::host_from_remote(origin) == component_info.host {
+                urls.push(format!("{origin}{project}"));
+            }
+        }
+
+        urls.push(format!("git@{}:{project}", component_info.host));
+        urls.push(format!("https://{}/{project}.git", component_info.host));
+
+        let mut unique = vec![];
+        for url in urls {
+            if !unique.contains(&url) {
+                unique.push(url);
+            }
+        }
+
+        unique
     }
 
     fn get_clone_repo_destination(
@@ -399,9 +502,30 @@ impl Git for GitImpl {
         // TODO: handle slashes correctly..
 
         let repo_dest = ParserUtils::get_component_dest_dir(&self.cache_path, &component_info);
+
+        if let Some(failed_at) = self.failed_components.lock().unwrap().get(&repo_dest) {
+            if failed_at.elapsed() < COMPONENT_RETRY_INTERVAL {
+                return Err(anyhow::anyhow!(
+                    "fetching {repo_dest} failed recently; retrying in at most {}s",
+                    COMPONENT_RETRY_INTERVAL.as_secs()
+                ));
+            }
+        }
+
         self.fs_utils.create_dir_all(&repo_dest)?;
 
-        GitImpl::clone_component_repo(repo_dest.as_str(), &component_info);
+        let clone_urls = self.component_clone_urls(&component_info);
+        let result =
+            GitImpl::clone_component_repo(repo_dest.as_str(), &component_info, &clone_urls);
+
+        let mut failed_components = self.failed_components.lock().unwrap();
+        if let Err(err) = result {
+            failed_components.insert(repo_dest, Instant::now());
+            return Err(err);
+        }
+        failed_components.remove(&repo_dest);
+        drop(failed_components);
+
         ParserUtils::get_component(&repo_dest, &component_info.component)
     }
 
@@ -421,6 +545,35 @@ fn prepend_if_needed(input: &str, character: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_component_clone_urls() {
+        let git = GitImpl::new(
+            vec![
+                "ssh://git@gitlab.example.com:2222/".to_string(),
+                "git@other.host:".to_string(),
+            ],
+            HashMap::new(),
+            String::new(),
+            Box::new(fs_utils::MockFSUtils::new()),
+        );
+
+        let urls = git.component_clone_urls(&ComponentInfo {
+            host: "gitlab.example.com".to_string(),
+            project: "group/components".to_string(),
+            component: "build".to_string(),
+            version: "1.0.0".to_string(),
+        });
+
+        assert_eq!(
+            urls,
+            vec![
+                "ssh://git@gitlab.example.com:2222/group/components",
+                "git@gitlab.example.com:group/components",
+                "https://gitlab.example.com/group/components.git",
+            ]
+        );
+    }
 
     #[test]
     fn test_get_clone_repo_destination_no_tag() {

@@ -146,6 +146,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                 ":".to_string(),
                 " ".to_string(),
                 "$".to_string(),
+                // interpolation functions: `$[[ inputs.x | expand_vars ]]`
+                "|".to_string(),
             ]),
             work_done_progress_options: WorkDoneProgressOptions {
                 work_done_progress: None,

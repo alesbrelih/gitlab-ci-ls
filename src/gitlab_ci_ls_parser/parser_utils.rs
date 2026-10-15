@@ -217,11 +217,22 @@ impl ParserUtils {
         let mut host = component_parts.remove(0).to_string();
         // check if CI_SERVER_FQDN is being used. If so check if env variable is being set else set
         // to to git host
-        if host.contains("$CI_SERVER_FQDN") {
-            let ci_server_fqdn =
-                env::var("CI_SERVER_FQDN").unwrap_or_else(|_| git_remote_uris[0].clone());
+        if host.contains("$CI_SERVER_FQDN") || host.contains("${CI_SERVER_FQDN}") {
+            let ci_server_fqdn = env::var("CI_SERVER_FQDN").ok().or_else(|| {
+                git_remote_uris
+                    .first()
+                    .map(|remote| Self::host_from_remote(remote))
+            });
 
-            host = host.replace("$CI_SERVER_FQDN", &ci_server_fqdn);
+            let Some(ci_server_fqdn) = ci_server_fqdn else {
+                return Err(anyhow::anyhow!(
+                    "could not resolve $CI_SERVER_FQDN; set it using `variables` initialization option"
+                ));
+            };
+
+            host = host
+                .replace("${CI_SERVER_FQDN}", &ci_server_fqdn)
+                .replace("$CI_SERVER_FQDN", &ci_server_fqdn);
         }
 
         let Some(component) = component_parts.pop() else {
@@ -243,6 +254,33 @@ impl ParserUtils {
             project: component_parts.join("/"),
             version: component_identificator[1].to_string(),
         })
+    }
+
+    /// Extracts the host from git remote prefixes that are used for cloning, e.g.:
+    /// `git@gitlab.com:`, `ssh://git@gitlab.com:2222/` or `https://gitlab.com/`.
+    pub fn host_from_remote(remote: &str) -> String {
+        let without_scheme = remote.split_once("://").map_or(remote, |(_, rest)| rest);
+        let without_user = without_scheme
+            .split_once('@')
+            .map_or(without_scheme, |(_, rest)| rest);
+
+        without_user
+            .split(['/', ':'])
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Components referenced through `$CI_PROJECT_PATH` live in the current project,
+    /// which is the recommended way of testing components in their own pipeline:
+    /// `$CI_SERVER_FQDN/$CI_PROJECT_PATH/my-component@$CI_COMMIT_SHA`
+    pub fn is_current_project_component(uri: &str) -> bool {
+        uri.contains("$CI_PROJECT_PATH") || uri.contains("${CI_PROJECT_PATH}")
+    }
+
+    /// Name of the component from the reference: `host/group/project/<name>@version`.
+    pub fn component_name_from_uri(uri: &str) -> Option<&str> {
+        uri.rsplit('/').next()?.split('@').next()
     }
 
     /// Extracts the content after the YAML document separator `---` in a component template.
@@ -393,6 +431,71 @@ mod tests {
             };
             assert_eq!(got, want);
         });
+    }
+
+    #[test]
+    fn test_extract_component_from_uri_ci_server_fqdn_from_git_remote() {
+        temp_env::with_var_unset("CI_SERVER_FQDN", || {
+            let component_uri = "$CI_SERVER_FQDN/some-project/component@1.0.0";
+            let got = ParserUtils::extract_component_from_uri(
+                component_uri,
+                &["git@gitlab.example.com:".to_string()],
+            )
+            .unwrap();
+
+            assert_eq!(got.host, "gitlab.example.com");
+            assert_eq!(got.project, "some-project");
+        });
+    }
+
+    #[test]
+    fn test_extract_component_from_uri_ci_server_fqdn_without_remotes() {
+        temp_env::with_var_unset("CI_SERVER_FQDN", || {
+            let got = ParserUtils::extract_component_from_uri(
+                "$CI_SERVER_FQDN/some-project/component@1.0.0",
+                &[],
+            );
+
+            assert!(got.is_err());
+        });
+    }
+
+    #[test]
+    fn test_host_from_remote() {
+        assert_eq!(
+            ParserUtils::host_from_remote("git@gitlab.com:"),
+            "gitlab.com"
+        );
+        assert_eq!(
+            ParserUtils::host_from_remote("ssh://git@gitlab.example.com:2222/"),
+            "gitlab.example.com"
+        );
+        assert_eq!(
+            ParserUtils::host_from_remote("https://gitlab.com/"),
+            "gitlab.com"
+        );
+        assert_eq!(ParserUtils::host_from_remote("gitlab.com"), "gitlab.com");
+    }
+
+    #[test]
+    fn test_is_current_project_component() {
+        assert!(ParserUtils::is_current_project_component(
+            "$CI_SERVER_FQDN/$CI_PROJECT_PATH/my-component@$CI_COMMIT_SHA"
+        ));
+        assert!(ParserUtils::is_current_project_component(
+            "${CI_SERVER_FQDN}/${CI_PROJECT_PATH}/my-component@main"
+        ));
+        assert!(!ParserUtils::is_current_project_component(
+            "gitlab.com/components/opentofu/full-pipeline@1.0.0"
+        ));
+    }
+
+    #[test]
+    fn test_component_name_from_uri() {
+        assert_eq!(
+            ParserUtils::component_name_from_uri("gitlab.com/group/project/name@1.0.0"),
+            Some("name")
+        );
     }
 
     #[test]
