@@ -92,6 +92,11 @@ pub struct InterpolationReference {
     pub end: usize,
 }
 
+/// Values containing `$[[ ... ]]` are only known once the component is included.
+pub fn contains_interpolation(value: &str) -> bool {
+    value.contains("$[[")
+}
+
 pub fn find_interpolations(line: &str) -> Vec<Interpolation> {
     let mut interpolations = vec![];
     let mut offset = 0;
@@ -280,7 +285,7 @@ pub fn validate_input_type(input_type: &str, raw_value: &str, is_block: bool) ->
     let value = raw_value.trim();
     let quoted = value.starts_with('"') || value.starts_with('\'');
     // values using interpolation/variables are resolved at runtime
-    if value.contains("$[[") {
+    if contains_interpolation(value) {
         return None;
     }
 

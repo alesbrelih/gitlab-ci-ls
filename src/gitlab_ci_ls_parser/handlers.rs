@@ -1497,6 +1497,10 @@ impl LSPHandlers {
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         'extend: for extend in extends {
+            if components::contains_interpolation(&extend.key) {
+                continue;
+            }
+
             if extend.uri == document_uri.to_string() {
                 for (_, root_nodes) in all_nodes.iter() {
                     if root_nodes.get(&extend.key).is_some() {
@@ -1537,7 +1541,7 @@ impl LSPHandlers {
         };
 
         for stage in stages {
-            if !all_stages.contains(&stage.key) {
+            if !all_stages.contains(&stage.key) && !components::contains_interpolation(&stage.key) {
                 diagnostics.push(Diagnostic::new_simple(
                     lsp_types::Range {
                         start: lsp_types::Position {
@@ -1559,6 +1563,10 @@ impl LSPHandlers {
             .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
 
         'needs: for need in needs {
+            if components::contains_interpolation(&need.key) {
+                continue;
+            }
+
             let need_split = need.key.split(' ').collect::<Vec<&str>>();
 
             match need_split.len() {
