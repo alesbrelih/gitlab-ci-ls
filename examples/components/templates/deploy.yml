@@ -1,0 +1,39 @@
+spec:
+  # values available as $[[ component.<value> ]]
+  component: [name, version, reference]
+  inputs:
+    stage:
+      default: deploy
+      description: Stage the deploy job runs in.
+    environment:
+      description: Environment to deploy to.
+      options: [staging, production]
+    version:
+      description: Version of the release, e.g. v1.2.3.
+      regex: ^v\d+\.\d+\.\d+$
+    replicas:
+      type: number
+      default: 1
+      description: Number of application replicas.
+    dry_run:
+      type: boolean
+      default: false
+      description: Only print what would be deployed.
+    extra_args:
+      type: array
+      default: []
+      description: Additional arguments passed to the deploy script.
+    image:
+      description: Image used by the deploy job.
+      rules:
+        - if: $[[ inputs.environment ]] == "production"
+          default: registry.example.com/deploy:stable
+        - default: registry.example.com/deploy:latest
+---
+deploy-$[[ inputs.environment ]]:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  script:
+    - echo "Deploying $[[ inputs.version ]] using $[[ component.name ]]@$[[ component.version ]]"
+    - ./deploy.sh --replicas $[[ inputs.replicas ]] --dry-run $[[ inputs.dry_run ]] $[[ inputs.extra_args ]]
+    - echo "Environment $[[ inputs.environment | posix_escape ]]"

@@ -1,0 +1,16 @@
+# Open this file to see the diagnostics reported for component includes.
+include:
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/deploy@$CI_COMMIT_SHA
+    inputs:
+      environment: qa
+      version: 1.2.3
+      replicas: three
+      dry_run: "true"
+      unknown: value
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/deploy@$CI_COMMIT_SHA
+    inputs:
+      stage: test
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/lint@$CI_COMMIT_SHA
+    inputs:
+      fix: true
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/missing@$CI_COMMIT_SHA

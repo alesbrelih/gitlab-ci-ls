@@ -22,6 +22,42 @@ It is intended to be used alongside `yaml-language-server` (yamlls), providing s
 It also supports jump to included files. In case it is a remote file it tries to downloading using
 current workspace git setup and caches it locally.
 
+### CI/CD components
+
+[CI/CD components](https://docs.gitlab.com/ee/ci/components/) are supported from both sides.
+
+When **including** a component (`include: - component: ...`):
+
+- Autocompletion of `inputs` keys, `options` values and `true`/`false` for `boolean` inputs.
+- Hover over the component shows an overview of all inputs (type, default, description). Hovering
+  an input shows its details.
+- Go to definition jumps to the component template, or to the input definition when an input is
+  hovered.
+- Diagnostics for unknown inputs, missing required inputs, values not matching `type`, `options`
+  or `regex`, and components that couldn't be resolved.
+
+When **writing** a component (or any file with a `spec:inputs` header):
+
+- Autocompletion inside `$[[ ... ]]` for `inputs.*`, `component.*` and functions such as
+  `expand_vars`, `truncate` and `posix_escape`.
+- Hover and go to definition for `$[[ inputs.x ]]`.
+- Diagnostics for inputs not declared in `spec:inputs`, `component.*` values not declared in
+  `spec:component`, and unknown interpolation functions.
+
+Components are resolved like this:
+
+- `$CI_SERVER_FQDN` resolves from the environment, the `variables` option or the workspace git
+  remote. Other variables in the component reference are expanded using the `variables` option.
+- Components referenced through `$CI_PROJECT_PATH` (e.g.
+  `$CI_SERVER_FQDN/$CI_PROJECT_PATH/my-component@$CI_COMMIT_SHA`) are read from the `templates/`
+  directory of the current workspace.
+- Other components are cloned into the cache. Versions can be a tag or branch, a commit SHA, or a
+  partial version (`1`, `1.2`, `~latest`) resolved to the highest matching semantic version tag.
+  A resolved version is cached under the requested name, so delete
+  `<cache>/components/<project>/<version>` to pick up newer releases.
+
+See [`examples/components`](examples/components) for a component project to try this out.
+
 ## Showcase
 
 Note that this video doesn't include all functionalities.
@@ -34,7 +70,7 @@ Initialization options:
 
 - **cache**: location for cached remote files
 - **log_path**: location for LS log
-- **variables**: map of CI variable names to values, used to expand `$VAR`/`${VAR}` occurrences in `include:` `project:` and `ref:` values. Variables not present in the map fall back to the process environment; unknown variables are left untouched. This is needed when includes are parameterized through instance- or group-level CI variables that only exist on the GitLab server. For example, every project on drupal.org's GitLab uses:
+- **variables**: map of CI variable names to values, used to expand `$VAR`/`${VAR}` occurrences in `include:` `project:`, `ref:` and `component:` values. Variables not present in the map fall back to the process environment; unknown variables are left untouched. This is needed when includes are parameterized through instance- or group-level CI variables that only exist on the GitLab server. For example, every project on drupal.org's GitLab uses:
 
   ```yaml
   include:

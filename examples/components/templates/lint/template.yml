@@ -1,0 +1,6 @@
+# A component without a `spec:` header doesn't accept any inputs.
+lint:
+  stage: test
+  image: node:22-alpine
+  script:
+    - npx eslint .
