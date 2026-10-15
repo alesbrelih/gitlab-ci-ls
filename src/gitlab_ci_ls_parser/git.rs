@@ -545,6 +545,260 @@ fn prepend_if_needed(input: &str, character: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    const PROJECT: &str = "group/components";
+    const VERSIONS: [&str; 3] = ["1.0.0", "1.2.0", "2.0.0"];
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Component project with one commit + tag per entry of `VERSIONS`, each tag having a
+    /// `templates/build.yml` that contains `# version <tag>`.
+    struct ComponentRepo {
+        dir: TempDir,
+        // commit SHA per tag
+        commits: HashMap<String, String>,
+    }
+
+    impl ComponentRepo {
+        fn new() -> Self {
+            let dir = TempDir::new().unwrap();
+            let repo = dir.path().join(PROJECT);
+            fs::create_dir_all(repo.join("templates")).unwrap();
+
+            git(&repo, &["init", "--quiet"]);
+            // allow fetching single commits like gitlab.com does
+            git(&repo, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
+
+            let mut commits = HashMap::new();
+            for version in VERSIONS {
+                fs::write(
+                    repo.join("templates/build.yml"),
+                    format!(
+                        "# version {version}\nspec:\n  inputs:\n    stage:\n      default: test\n---\nbuild:\n  script: echo {version}\n"
+                    ),
+                )
+                .unwrap();
+                git(&repo, &["add", "."]);
+                git(&repo, &["commit", "--quiet", "-m", version]);
+                git(&repo, &["tag", version]);
+                commits.insert(version.to_string(), git(&repo, &["rev-parse", "HEAD"]));
+            }
+
+            Self { dir, commits }
+        }
+
+        /// Base URL as it would be configured in the package map.
+        fn origin(&self) -> String {
+            format!("file://{}/", self.dir.path().display())
+        }
+
+        fn clone_url(&self) -> String {
+            format!("{}{PROJECT}", self.origin())
+        }
+    }
+
+    fn component_info(version: &str) -> ComponentInfo {
+        ComponentInfo {
+            host: "gitlab.invalid".to_string(),
+            project: PROJECT.to_string(),
+            component: "build".to_string(),
+            version: version.to_string(),
+        }
+    }
+
+    fn checked_out_version(dest: &Path) -> String {
+        let content = fs::read_to_string(dest.join("templates/build.yml")).unwrap();
+        content
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("# version ")
+            .to_string()
+    }
+
+    fn is_empty_dir(path: &Path) -> bool {
+        path.read_dir().unwrap().next().is_none()
+    }
+
+    fn git_impl(repo: &ComponentRepo, cache: &TempDir) -> GitImpl {
+        GitImpl::new(
+            vec![],
+            HashMap::from([(PROJECT.to_string(), repo.origin())]),
+            format!("{}/", cache.path().display()),
+            Box::new(fs_utils::FSUtilsImpl::new(String::new())),
+        )
+    }
+
+    #[test]
+    fn test_clone_component_repo_resolves_versions() {
+        let repo = ComponentRepo::new();
+        let dest = TempDir::new().unwrap();
+
+        for (requested, expected) in [
+            ("1.0.0", "1.0.0"),
+            ("1", "1.2.0"),
+            ("1.0", "1.0.0"),
+            ("2", "2.0.0"),
+            ("~latest", "2.0.0"),
+        ] {
+            let repo_dest = dest.path().join(requested);
+            // fetch_remote_component creates the directory before cloning
+            fs::create_dir_all(&repo_dest).unwrap();
+
+            GitImpl::clone_component_repo(
+                repo_dest.to_str().unwrap(),
+                &component_info(requested),
+                &[repo.clone_url()],
+            )
+            .unwrap_or_else(|err| panic!("cloning {requested} failed: {err}"));
+
+            assert_eq!(checked_out_version(&repo_dest), expected, "{requested}");
+        }
+    }
+
+    #[test]
+    fn test_clone_component_repo_by_commit_sha() {
+        let repo = ComponentRepo::new();
+        let dest = TempDir::new().unwrap();
+        let sha = &repo.commits["1.2.0"];
+
+        GitImpl::clone_component_repo(
+            dest.path().to_str().unwrap(),
+            &component_info(sha),
+            &[repo.clone_url()],
+        )
+        .unwrap();
+
+        assert_eq!(checked_out_version(dest.path()), "1.2.0");
+    }
+
+    #[test]
+    fn test_clone_component_repo_unknown_version_leaves_empty_dir() {
+        let repo = ComponentRepo::new();
+
+        for (version, error) in [
+            ("3", "no tag matches version 3"),
+            ("9.9.9", "git clone failed"),
+            ("main-does-not-exist", "git clone failed"),
+        ] {
+            let dest = TempDir::new().unwrap();
+
+            let err = GitImpl::clone_component_repo(
+                dest.path().to_str().unwrap(),
+                &component_info(version),
+                &[repo.clone_url()],
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(err.contains(error), "{version}: {err}");
+            assert!(is_empty_dir(dest.path()), "{version}");
+        }
+    }
+
+    #[test]
+    fn test_clone_component_repo_falls_back_to_next_url() {
+        let repo = ComponentRepo::new();
+        let dest = TempDir::new().unwrap();
+        let missing = TempDir::new().unwrap();
+
+        GitImpl::clone_component_repo(
+            dest.path().to_str().unwrap(),
+            &component_info("2.0.0"),
+            &[
+                format!("file://{}/{PROJECT}", missing.path().display()),
+                repo.clone_url(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(checked_out_version(dest.path()), "2.0.0");
+    }
+
+    #[test]
+    fn test_clone_component_repo_reuses_existing_checkout() {
+        let dest = TempDir::new().unwrap();
+        fs::write(dest.path().join("marker"), "cached").unwrap();
+
+        // no network/git access needed when the cache is already populated
+        GitImpl::clone_component_repo(
+            dest.path().to_str().unwrap(),
+            &component_info("1.0.0"),
+            &["file:///does/not/exist".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dest.path().join("marker")).unwrap(),
+            "cached"
+        );
+    }
+
+    #[test]
+    fn test_fetch_remote_component() {
+        let repo = ComponentRepo::new();
+        let cache = TempDir::new().unwrap();
+        let git = git_impl(&repo, &cache);
+
+        let element = git.fetch_remote_component(component_info("1")).unwrap();
+
+        let expected_path = format!(
+            "{}/components/{PROJECT}/1/templates/build.yml",
+            cache.path().display()
+        );
+        assert_eq!(element.uri, format!("file://{expected_path}"));
+        assert!(element
+            .content
+            .unwrap()
+            .starts_with("# version 1.2.0\nspec:"));
+    }
+
+    #[test]
+    fn test_fetch_remote_component_remembers_failures() {
+        let repo = ComponentRepo::new();
+        let cache = TempDir::new().unwrap();
+        let git = git_impl(&repo, &cache);
+
+        let err = git
+            .fetch_remote_component(component_info("3"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no tag matches version 3"), "{err}");
+
+        let err = git
+            .fetch_remote_component(component_info("3"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("failed recently"), "{err}");
+
+        // other versions of the same project aren't affected
+        assert!(git.fetch_remote_component(component_info("2")).is_ok());
+    }
 
     #[test]
     fn test_component_clone_urls() {

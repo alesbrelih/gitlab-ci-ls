@@ -4,6 +4,8 @@ use lsp_server::RequestId;
 use lsp_types::{Diagnostic, TextEdit, Url};
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[cfg(test)]
+mod component_e2e_tests;
 pub mod components;
 pub mod fs_utils;
 pub mod git;
