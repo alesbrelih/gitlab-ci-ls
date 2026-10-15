@@ -1,12 +1,12 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Instant};
+use std::{collections::HashMap, fmt::Write as _, fs, path::PathBuf, sync::Mutex, time::Instant};
 
 use anyhow::anyhow;
 use log::{debug, error, info, warn};
 use lsp_server::{Notification, Request};
 use lsp_types::{
-    request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams, Position, RenameParams,
-    TextDocumentPositionParams, TextEdit, Url,
+    request::GotoTypeDefinitionParams, CompletionParams, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverParams,
+    Position, RenameParams, TextDocumentPositionParams, TextEdit, Url,
 };
 use regex::Regex;
 
@@ -16,12 +16,13 @@ use crate::gitlab_ci_ls_parser::{
 };
 
 use super::{
-    fs_utils,
+    components, fs_utils,
     parser::{self, PositionType},
     parser_utils, treesitter, CompletionResult, Component, ComponentInput, DefinitionResult,
     GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult, IncludeInformation,
-    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
-    RemoteInclude, RuleReference,
+    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, ParsedComponentSpec, Range,
+    ReferencesResult, RemoteInclude, RuleReference, COMPONENT_CONTEXT_VALUES,
+    INTERPOLATION_FUNCTIONS,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -119,10 +120,31 @@ impl LSPHandlers {
         let position = params.text_document_position_params.position;
         let line = document.lines().nth(position.line as usize)?;
 
+        if let Some(content) =
+            self.on_hover_interpolation(uri.as_str(), document, line, position.character)
+        {
+            return Some(LSPResult::Hover(HoverResult {
+                id: request.id,
+                content,
+            }));
+        }
+
+        let position_type = self.parser.get_position_type(document, position);
+        if let PositionType::Include(IncludeInformation {
+            component: Some(component),
+            ..
+        }) = &position_type
+        {
+            return Some(LSPResult::Hover(HoverResult {
+                id: request.id,
+                content: self.on_hover_component(component),
+            }));
+        }
+
         let word = parser_utils::ParserUtils::extract_word(line, position.character as usize)?
             .trim_end_matches(':');
 
-        match self.parser.get_position_type(document, position) {
+        match position_type {
             parser::PositionType::Extend | PositionType::Dependency => {
                 for (document_uri, node) in nodes.iter() {
                     for (key, element) in node {
@@ -240,6 +262,65 @@ impl LSPHandlers {
             }
             _ => None,
         }
+    }
+
+    /// Hover over `$[[ inputs.x ]]` / `$[[ component.x ]]` inside a file with a `spec:` header.
+    fn on_hover_interpolation(
+        &self,
+        uri: &str,
+        document: &str,
+        line: &str,
+        character: u32,
+    ) -> Option<String> {
+        let reference = components::interpolation_reference_at(line, character as usize)?;
+        let spec = self.parser.get_component_spec(uri, document)?;
+
+        match reference.context.as_str() {
+            components::INPUTS_CONTEXT => {
+                let input = spec.inputs.iter().find(|i| i.key == reference.name)?;
+
+                Some(format!(
+                    "### Input `{}`\n{}",
+                    input.key,
+                    input.autocomplete_details()
+                ))
+            }
+            components::COMPONENT_CONTEXT => {
+                let (name, description) = COMPONENT_CONTEXT_VALUES
+                    .iter()
+                    .find(|(name, _)| *name == reference.name)?;
+
+                Some(format!("### `component.{name}`\n{description}"))
+            }
+            _ => None,
+        }
+    }
+
+    /// Hover over a component include: details of the hovered input or a component overview.
+    fn on_hover_component(&self, component: &Component) -> String {
+        let components = self.components.lock().unwrap();
+        let Some(spec) = components.get(&component.uri) else {
+            return format!(
+                "Component `{}` could not be resolved. Check the language server logs for details.",
+                component.uri
+            );
+        };
+
+        let focused_input = component
+            .inputs
+            .iter()
+            .find(|i| i.hovered || i.value_plain.hovered || i.value_block.hovered)
+            .and_then(|focused| spec.inputs.iter().find(|i| i.key == focused.key));
+
+        if let Some(input) = focused_input {
+            return format!(
+                "### Input `{}`\n{}",
+                input.key,
+                input.autocomplete_details()
+            );
+        }
+
+        component_overview(spec)
     }
 
     pub fn on_change(&self, notification: Notification) -> Option<LSPResult> {
@@ -382,6 +463,12 @@ impl LSPHandlers {
                 info!("found stage: {:?}", &stage);
                 all_stages.insert(stage.key.clone(), stage);
             }
+
+            let mut all_components = self.components.lock().unwrap();
+            for component in results.components {
+                info!("found component: {component:?}");
+                all_components.insert(component.uri.clone(), component);
+            }
         }
 
         info!("finished searching");
@@ -408,6 +495,18 @@ impl LSPHandlers {
         let stages = self.stages.lock().unwrap();
 
         let mut locations: Vec<LSPLocation> = vec![];
+
+        if let Some(location) = self.on_definition_interpolation(
+            document_uri.as_str(),
+            document,
+            document.lines().nth(position.line as usize)?,
+            position.character,
+        ) {
+            return Some(LSPResult::Definition(DefinitionResult {
+                id: request.id,
+                locations: vec![location],
+            }));
+        }
 
         match self.parser.get_position_type(document, position) {
             parser::PositionType::RootNode
@@ -546,6 +645,33 @@ impl LSPHandlers {
         }))
     }
 
+    /// `$[[ inputs.x ]]` -> input definition in the `spec:inputs` header of the same file.
+    fn on_definition_interpolation(
+        &self,
+        uri: &str,
+        document: &str,
+        line: &str,
+        character: u32,
+    ) -> Option<LSPLocation> {
+        let reference = components::interpolation_reference_at(line, character as usize)?;
+        if reference.context != components::INPUTS_CONTEXT {
+            return None;
+        }
+
+        let range = self
+            .parser
+            .get_component_spec(uri, document)?
+            .inputs
+            .into_iter()
+            .find(|i| i.key == reference.name)?
+            .definition_range?;
+
+        Some(LSPLocation {
+            uri: uri.to_string(),
+            range,
+        })
+    }
+
     #[allow(clippy::too_many_lines)]
     fn on_definition_include(
         &self,
@@ -613,29 +739,19 @@ impl LSPHandlers {
                 basic: None,
                 component: Some(component),
             } => {
-                let component_uri = component
-                    .uri
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .to_string();
+                // jump to the input definition when an input key is hovered
+                let hovered_input = component.inputs.iter().find(|i| i.hovered);
 
                 self.components
                     .lock()
                     .unwrap()
-                    .values()
-                    .find(|c| c.uri == component_uri)
+                    .get(&component.uri)
                     .map(|c| LSPLocation {
                         uri: c.local_path.clone(),
-                        range: Range {
-                            start: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: LSPPosition {
-                                line: 0,
-                                character: 0,
-                            },
-                        },
+                        range: hovered_input
+                            .and_then(|hovered| c.inputs.iter().find(|i| i.key == hovered.key))
+                            .and_then(|i| i.definition_range.clone())
+                            .unwrap_or_default(),
                     })
             }
             IncludeInformation {
@@ -724,6 +840,15 @@ impl LSPHandlers {
 
         let position = params.text_document_position.position;
         let line = document.lines().nth(position.line as usize)?;
+
+        if let Some(items) =
+            self.on_completion_interpolation(document_uri.as_str(), document, line, position)
+        {
+            return Some(LSPResult::Completion(CompletionResult {
+                id: request.id,
+                list: items,
+            }));
+        }
 
         let items = match self.parser.get_position_type(document, position) {
             parser::PositionType::Stage => self.on_completion_stages(line, position).ok()?,
@@ -1372,6 +1497,10 @@ impl LSPHandlers {
         let mut diagnostics: Vec<Diagnostic> = vec![];
 
         'extend: for extend in extends {
+            if components::contains_interpolation(&extend.key) {
+                continue;
+            }
+
             if extend.uri == document_uri.to_string() {
                 for (_, root_nodes) in all_nodes.iter() {
                     if root_nodes.get(&extend.key).is_some() {
@@ -1412,7 +1541,7 @@ impl LSPHandlers {
         };
 
         for stage in stages {
-            if !all_stages.contains(&stage.key) {
+            if !all_stages.contains(&stage.key) && !components::contains_interpolation(&stage.key) {
                 diagnostics.push(Diagnostic::new_simple(
                     lsp_types::Range {
                         start: lsp_types::Position {
@@ -1434,6 +1563,10 @@ impl LSPHandlers {
             .get_all_job_needs(document_uri.to_string(), content.as_str(), None);
 
         'needs: for need in needs {
+            if components::contains_interpolation(&need.key) {
+                continue;
+            }
+
             let need_split = need.key.split(' ').collect::<Vec<&str>>();
 
             match need_split.len() {
@@ -1487,42 +1620,66 @@ impl LSPHandlers {
 
         let all_components = self.components.lock().unwrap();
         for component in components {
-            if let Some(spec) = all_components.get(&component.key) {
-                component.inputs.iter().for_each(|i| {
-                    // check invalid ones -> those that aren't defined in spec
-                    let spec_definition = &spec.inputs.iter().find(|si| si.key == i.key);
-
-                    if let Some(spec_definition) = spec_definition {
-                        generate_component_diagnostics_from_spec(
-                            i,
-                            spec_definition,
-                            &mut diagnostics,
-                        );
-                    } else {
-                        // wasn't found in spec -> invalid key
-                        diagnostics.push(Diagnostic::new_simple(
-                            lsp_types::Range {
-                                start: lsp_types::Position {
-                                    line: i.range.start.line,
-                                    character: i.range.start.character,
-                                },
-                                end: lsp_types::Position {
-                                    line: i.range.end.line,
-                                    character: i.range.end.character,
-                                },
-                            },
-                            format!(
-                                "Invalid input key. Key needs to be one of: '{}'.",
-                                spec.inputs
-                                    .iter()
-                                    .map(|i| i.key.clone())
-                                    .collect::<Vec<String>>()
-                                    .join(", ")
-                            ),
-                        ));
-                    }
+            let Some(spec) = all_components.get(&component.key) else {
+                diagnostics.push(Diagnostic {
+                    range: to_lsp_range(&component.key_range),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    message: format!(
+                        "Could not resolve component: {}. Check the language server logs for details.",
+                        component.key
+                    ),
+                    ..Default::default()
                 });
+
+                continue;
+            };
+
+            for i in &component.inputs {
+                // check invalid ones -> those that aren't defined in spec
+                if let Some(spec_definition) = spec.inputs.iter().find(|si| si.key == i.key) {
+                    generate_component_diagnostics_from_spec(i, spec_definition, &mut diagnostics);
+                } else {
+                    // wasn't found in spec -> invalid key
+                    let message = if spec.inputs.is_empty() {
+                        "Invalid input key. Component does not accept any inputs.".to_string()
+                    } else {
+                        format!(
+                            "Invalid input key. Key needs to be one of: '{}'.",
+                            spec.inputs
+                                .iter()
+                                .map(|i| i.key.clone())
+                                .collect::<Vec<String>>()
+                                .join(", ")
+                        )
+                    };
+
+                    diagnostics.push(Diagnostic::new_simple(to_lsp_range(&i.range), message));
+                }
             }
+
+            let missing: Vec<&str> = spec
+                .inputs
+                .iter()
+                .filter(|si| si.is_required() && !component.inputs.iter().any(|i| i.key == si.key))
+                .map(|si| si.key.as_str())
+                .collect();
+
+            if !missing.is_empty() {
+                diagnostics.push(Diagnostic::new_simple(
+                    to_lsp_range(&component.key_range),
+                    format!("Missing required inputs: {}.", missing.join(", ")),
+                ));
+            }
+        }
+        drop(all_components);
+
+        // files with a `spec:` header (components, included files with inputs) can use
+        // `$[[ ... ]]` interpolation
+        if let Some(spec) = self
+            .parser
+            .get_component_spec(document_uri.as_str(), &content)
+        {
+            diagnostics.extend(interpolation_diagnostics(&content, &spec));
         }
 
         let caches = self
@@ -1695,68 +1852,172 @@ impl LSPHandlers {
                 .collect();
 
             return Ok(items);
-        } else if let Some(hovered_input) = component.inputs.iter().find(|i| i.value_plain.hovered)
-        {
-            let word = parser_utils::ParserUtils::word_before_cursor(
-                line,
-                position.character as usize,
-                |c| c.is_whitespace() || c == ':',
-            );
-
-            let after = parser_utils::ParserUtils::word_after_cursor(
-                line,
-                position.character as usize,
-                |c: char| c.is_whitespace(),
-            );
-
-            let components_store = self.components.lock().unwrap();
-            let Some(component_spec) = components_store.get(&component.uri) else {
-                warn!(
-                    "could not find component spec; indexing went wrong!; searching for {}",
-                    component.uri
-                );
-
-                return Ok(vec![]);
-            };
-
-            if let Some(input_spec) = component_spec
-                .inputs
-                .iter()
-                .find(|i| i.key == hovered_input.key)
-            {
-                if let Some(options) = &input_spec.options {
-                    let items = options
-                        .iter()
-                        .filter(|option| option.contains(word))
-                        .flat_map(|option| -> anyhow::Result<LSPCompletion> {
-                            Ok(LSPCompletion {
-                                label: option.clone(),
-                                details: None,
-                                location: LSPLocation {
-                                    range: Range {
-                                        start: LSPPosition {
-                                            line: position.line,
-                                            character: position.character
-                                                - u32::try_from(word.len())?,
-                                        },
-                                        end: LSPPosition {
-                                            line: position.line,
-                                            character: position.character
-                                                + u32::try_from(after.len())?,
-                                        },
-                                    },
-                                    ..Default::default()
-                                },
-                            })
-                        })
-                        .collect();
-
-                    return Ok(items);
-                }
-            }
         }
 
-        Ok(vec![])
+        let before_cursor = line.get(..position.character as usize).unwrap_or_default();
+        let Some(value_key) = component
+            .inputs
+            .iter()
+            .find(|i| i.value_plain.hovered)
+            .map(|i| i.key.clone())
+            // `key: |` doesn't have a value node yet
+            .or_else(|| input_key_before_value(before_cursor))
+        else {
+            return Ok(vec![]);
+        };
+
+        let word =
+            parser_utils::ParserUtils::word_before_cursor(line, position.character as usize, |c| {
+                c.is_whitespace() || c == ':'
+            });
+
+        let after = parser_utils::ParserUtils::word_after_cursor(
+            line,
+            position.character as usize,
+            |c: char| c.is_whitespace(),
+        );
+
+        let components_store = self.components.lock().unwrap();
+        let Some(component_spec) = components_store.get(&component.uri) else {
+            warn!(
+                "could not find component spec; indexing went wrong!; searching for {}",
+                component.uri
+            );
+
+            return Ok(vec![]);
+        };
+
+        let Some(input_spec) = component_spec.inputs.iter().find(|i| i.key == value_key) else {
+            return Ok(vec![]);
+        };
+
+        let values = match &input_spec.options {
+            Some(options) => options.clone(),
+            None if input_spec.input_type() == "boolean" => {
+                vec!["true".to_string(), "false".to_string()]
+            }
+            None => return Ok(vec![]),
+        };
+
+        let typed = parser_utils::ParserUtils::strip_quotes(word);
+        let items = values
+            .into_iter()
+            .filter(|value| value.contains(typed))
+            .flat_map(|value| -> anyhow::Result<LSPCompletion> {
+                let details = input_spec
+                    .default_as_string()
+                    .filter(|d| *d == value)
+                    .map(|_| "Default value".to_string());
+
+                Ok(LSPCompletion {
+                    label: value,
+                    details,
+                    location: LSPLocation {
+                        range: Range {
+                            start: LSPPosition {
+                                line: position.line,
+                                character: position.character - u32::try_from(word.len())?,
+                            },
+                            end: LSPPosition {
+                                line: position.line,
+                                character: position.character + u32::try_from(after.len())?,
+                            },
+                        },
+                        ..Default::default()
+                    },
+                })
+            })
+            .collect();
+
+        Ok(items)
+    }
+
+    /// Completion inside of `$[[ ... ]]` interpolation blocks.
+    fn on_completion_interpolation(
+        &self,
+        uri: &str,
+        document: &str,
+        line: &str,
+        position: Position,
+    ) -> Option<Vec<LSPCompletion>> {
+        let cursor = position.character as usize;
+        let completion = components::interpolation_completion_at(line, cursor)?;
+        let typed = completion.typed();
+
+        let range = Range {
+            start: LSPPosition {
+                line: position.line,
+                character: position
+                    .character
+                    .checked_sub(u32::try_from(typed.len()).ok()?)?,
+            },
+            end: LSPPosition {
+                line: position.line,
+                character: position.character
+                    + u32::try_from(components::identifier_len_after(line, cursor)).ok()?,
+            },
+        };
+
+        let candidates: Vec<(String, Option<String>)> = match &completion {
+            components::InterpolationCompletion::Context { .. } => vec![
+                (
+                    components::INPUTS_CONTEXT.to_string(),
+                    Some("Inputs declared in `spec:inputs`.".to_string()),
+                ),
+                (
+                    components::COMPONENT_CONTEXT.to_string(),
+                    Some("Component metadata declared in `spec:component`.".to_string()),
+                ),
+            ],
+            components::InterpolationCompletion::Name { context, .. } => {
+                let spec = self
+                    .parser
+                    .get_component_spec(uri, document)
+                    .unwrap_or_default();
+
+                match context.as_str() {
+                    components::INPUTS_CONTEXT => spec
+                        .inputs
+                        .iter()
+                        .map(|i| (i.key.clone(), Some(i.autocomplete_details())))
+                        .collect(),
+                    components::COMPONENT_CONTEXT => COMPONENT_CONTEXT_VALUES
+                        .iter()
+                        .map(|(name, description)| {
+                            let mut details = (*description).to_string();
+                            if !spec.component_context.iter().any(|c| c == name) {
+                                let _ = write!(
+                                    details,
+                                    "\n\nAdd `{name}` to `spec:component` to use it."
+                                );
+                            }
+
+                            ((*name).to_string(), Some(details))
+                        })
+                        .collect(),
+                    _ => vec![],
+                }
+            }
+            components::InterpolationCompletion::Function { .. } => INTERPOLATION_FUNCTIONS
+                .iter()
+                .map(|(name, description)| ((*name).to_string(), Some((*description).to_string())))
+                .collect(),
+        };
+
+        Some(
+            candidates
+                .into_iter()
+                .filter(|(label, _)| label.starts_with(typed))
+                .map(|(label, details)| LSPCompletion {
+                    label,
+                    details,
+                    location: LSPLocation {
+                        range: range.clone(),
+                        ..Default::default()
+                    },
+                })
+                .collect(),
+        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2253,72 +2514,220 @@ impl LSPHandlers {
     }
 }
 
+fn to_lsp_range(range: &Range) -> lsp_types::Range {
+    lsp_types::Range {
+        start: lsp_types::Position {
+            line: range.start.line,
+            character: range.start.character,
+        },
+        end: lsp_types::Position {
+            line: range.end.line,
+            character: range.end.character,
+        },
+    }
+}
+
+/// Range on a single line from byte offsets.
+fn line_range(line: usize, start: usize, end: usize) -> Option<lsp_types::Range> {
+    let line = u32::try_from(line).ok()?;
+
+    Some(lsp_types::Range {
+        start: lsp_types::Position {
+            line,
+            character: u32::try_from(start).ok()?,
+        },
+        end: lsp_types::Position {
+            line,
+            character: u32::try_from(end).ok()?,
+        },
+    })
+}
+
+/// For `  my_input: val|` returns `my_input` so values can be completed
+/// even before tree-sitter sees a value node.
+fn input_key_before_value(before_cursor: &str) -> Option<String> {
+    let (key, value) = before_cursor.trim_start().split_once(':')?;
+    if key.is_empty() || key.contains(char::is_whitespace) || value.trim().contains(' ') {
+        return None;
+    }
+
+    Some(ParserUtils::strip_quotes(key).to_string())
+}
+
+fn component_overview(component: &Component) -> String {
+    let name = ParserUtils::component_name_from_uri(&component.uri).unwrap_or(&component.uri);
+    let file_name = component
+        .local_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&component.local_path);
+
+    let mut overview = format!(
+        "## Component `{name}`\n`{}`\n\nTemplate: [{file_name}]({})\n",
+        component.uri, component.local_path
+    );
+
+    if component.inputs.is_empty() {
+        overview.push_str("\nThis component has no inputs.\n");
+        return overview;
+    }
+
+    overview.push_str("\n| Input | Type | Default | Description |\n| --- | --- | --- | --- |\n");
+    for input in &component.inputs {
+        let default = match input.default_as_string() {
+            Some(d) if d.is_empty() => "`\"\"`".to_string(),
+            Some(d) => format!("`{}`", d.replace('|', "\\|")),
+            None if input.has_rules => "_from rules_".to_string(),
+            None => "**required**".to_string(),
+        };
+        let description = input
+            .description
+            .as_deref()
+            .unwrap_or_default()
+            .replace('|', "\\|")
+            .replace('\n', " ");
+
+        let _ = writeln!(
+            overview,
+            "| `{}` | {} | {default} | {description} |",
+            input.key,
+            input.input_type()
+        );
+    }
+
+    overview
+}
+
+/// Validates `$[[ ... ]]` interpolation against the `spec:` header of the same file.
+fn interpolation_diagnostics(content: &str, spec: &ParsedComponentSpec) -> Vec<Diagnostic> {
+    let mut diagnostics = vec![];
+
+    for (line_idx, line) in content.lines().enumerate() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+
+        for reference in components::find_interpolation_references(line) {
+            let name = &reference.name;
+            let message = match reference.context.as_str() {
+                components::INPUTS_CONTEXT if !spec.inputs.iter().any(|i| i.key == *name) => {
+                    Some(format!("Input `{name}` is not defined in `spec:inputs`."))
+                }
+                components::COMPONENT_CONTEXT if !spec.component_context.contains(name) => {
+                    if COMPONENT_CONTEXT_VALUES.iter().any(|(v, _)| v == name) {
+                        Some(format!(
+                            "`component.{name}` needs to be declared in `spec:component`."
+                        ))
+                    } else {
+                        Some(format!(
+                            "Unknown component context `{name}`. Valid values are: {}.",
+                            COMPONENT_CONTEXT_VALUES
+                                .iter()
+                                .map(|(v, _)| *v)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ))
+                    }
+                }
+                // other contexts (e.g. `matrix`) are resolved elsewhere
+                _ => None,
+            };
+
+            if let (Some(message), Some(range)) = (
+                message,
+                line_range(line_idx, reference.start, reference.end),
+            ) {
+                diagnostics.push(Diagnostic::new_simple(range, message));
+            }
+        }
+
+        for function in components::find_interpolation_functions(line) {
+            if INTERPOLATION_FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == function.name)
+            {
+                continue;
+            }
+
+            if let Some(range) = line_range(line_idx, function.start, function.end) {
+                diagnostics.push(Diagnostic::new_simple(
+                    range,
+                    format!(
+                        "Unknown interpolation function `{}`. Valid functions are: {}.",
+                        function.name,
+                        INTERPOLATION_FUNCTIONS
+                            .iter()
+                            .map(|(name, _)| *name)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+
+    diagnostics
+}
+
 fn generate_component_diagnostics_from_spec(
     i: &GitlabInputElement,
     spec_definition: &ComponentInput,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some(input_value_element) = &i.value_plain {
-        if let Some(input_value) = &input_value_element.content {
-            // check options
-            if let Some(options) = &spec_definition.options {
-                if !options.contains(input_value) {
-                    diagnostics.push(Diagnostic::new_simple(
-                        lsp_types::Range {
-                            start: lsp_types::Position {
-                                line: input_value_element.range.start.line,
-                                character: input_value_element.range.start.character,
-                            },
-                            end: lsp_types::Position {
-                                line: input_value_element.range.end.line,
-                                character: input_value_element.range.end.character,
-                            },
-                        },
-                        format!(
-                            "Invalid input value. Value needs to be one of: '{}'.",
-                            options.join(", ")
-                        ),
-                    ));
-                }
-            }
+    let (value, is_block) = match (&i.value_plain, &i.value_block) {
+        (Some(value), _) => (value, false),
+        (None, Some(value)) => (value, true),
+        (None, None) => {
+            diagnostics.push(Diagnostic::new_simple(
+                to_lsp_range(&i.range),
+                "Missing value.".to_string(),
+            ));
 
-            // check if it matches to the spec pattern
-            if let Some(pattern) = &spec_definition.regex {
-                if let Ok(regex) = Regex::new(pattern.trim_matches('/')) {
-                    if !regex.is_match(input_value) {
-                        diagnostics.push(Diagnostic::new_simple(
-                            lsp_types::Range {
-                                start: lsp_types::Position {
-                                    line: input_value_element.range.start.line,
-                                    character: input_value_element.range.start.character,
-                                },
-                                end: lsp_types::Position {
-                                    line: input_value_element.range.end.line,
-                                    character: input_value_element.range.end.character,
-                                },
-                            },
-                            format!("Invalid value. Value needs to match the pattern: {pattern}"),
-                        ));
-                    }
-                } else {
-                    error!("could not parse regex from input spec regex: {pattern}");
-                }
-            }
+            return;
         }
-    } else {
-        diagnostics.push(Diagnostic::new_simple(
-            lsp_types::Range {
-                start: lsp_types::Position {
-                    line: i.range.start.line,
-                    character: i.range.start.character,
-                },
-                end: lsp_types::Position {
-                    line: i.range.end.line,
-                    character: i.range.end.character,
-                },
-            },
-            "Missing value.".to_string(),
-        ));
+    };
+
+    let raw_value = value.content.as_deref().unwrap_or(&value.key);
+    if let Some(message) =
+        components::validate_input_type(spec_definition.input_type(), raw_value, is_block)
+    {
+        diagnostics.push(Diagnostic::new_simple(to_lsp_range(&value.range), message));
+
+        return;
+    }
+
+    // values passed through interpolation are only known when the pipeline is created
+    if is_block || raw_value.contains("$[[") {
+        return;
+    }
+
+    let input_value = &value.key;
+
+    // check options
+    if let Some(options) = &spec_definition.options {
+        if !options.contains(input_value) {
+            diagnostics.push(Diagnostic::new_simple(
+                to_lsp_range(&value.range),
+                format!(
+                    "Invalid input value. Value needs to be one of: '{}'.",
+                    options.join(", ")
+                ),
+            ));
+        }
+    }
+
+    // check if it matches to the spec pattern
+    if let Some(pattern) = &spec_definition.regex {
+        if let Ok(regex) = Regex::new(pattern.trim_matches('/')) {
+            if !regex.is_match(input_value) {
+                diagnostics.push(Diagnostic::new_simple(
+                    to_lsp_range(&value.range),
+                    format!("Invalid value. Value needs to match the pattern: {pattern}"),
+                ));
+            }
+        } else {
+            error!("could not parse regex from input spec regex: {pattern}");
+        }
     }
 }
 #[cfg(test)]
@@ -2501,5 +2910,171 @@ mod tests {
 
         assert_eq!(resolved.len(), 5);
         assert_eq!(resolved, expected);
+    }
+}
+
+#[cfg(test)]
+mod component_tests {
+    use super::*;
+
+    fn element(key: &str, content: &str, line: u32) -> GitlabElement {
+        GitlabElement {
+            key: key.to_string(),
+            content: Some(content.to_string()),
+            range: Range {
+                start: LSPPosition { line, character: 0 },
+                end: LSPPosition { line, character: 1 },
+            },
+            ..Default::default()
+        }
+    }
+
+    fn input(key: &str) -> GitlabInputElement {
+        GitlabInputElement {
+            key: key.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_input_key_before_value() {
+        assert_eq!(
+            input_key_before_value("      stage: te").as_deref(),
+            Some("stage")
+        );
+        assert_eq!(
+            input_key_before_value("      \"stage\": ").as_deref(),
+            Some("stage")
+        );
+        assert_eq!(
+            input_key_before_value("  - component: gitlab.com/a/b@1"),
+            None
+        );
+        assert_eq!(input_key_before_value("      stage"), None);
+    }
+
+    #[test]
+    fn test_component_input_diagnostics() {
+        let spec = ComponentInput {
+            key: "stage".to_string(),
+            prop_type: Some("string".to_string()),
+            options: Some(vec!["test".to_string(), "build".to_string()]),
+            ..Default::default()
+        };
+
+        let mut diagnostics = vec![];
+
+        // quoted values are compared without quotes
+        let mut i = input("stage");
+        i.value_plain = Some(element("test", "\"test\"", 1));
+        generate_component_diagnostics_from_spec(&i, &spec, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        i.value_plain = Some(element("deploy", "deploy", 1));
+        generate_component_diagnostics_from_spec(&i, &spec, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("one of"));
+
+        // block values are valid values
+        diagnostics.clear();
+        let mut i = input("script");
+        i.value_block = Some(element("|\n  echo", "|\n  echo", 1));
+        generate_component_diagnostics_from_spec(&i, &ComponentInput::default(), &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        // no value at all
+        generate_component_diagnostics_from_spec(
+            &input("script"),
+            &ComponentInput::default(),
+            &mut diagnostics,
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "Missing value.");
+
+        // type mismatch
+        diagnostics.clear();
+        let number = ComponentInput {
+            key: "replicas".to_string(),
+            prop_type: Some("number".to_string()),
+            ..Default::default()
+        };
+        let mut i = input("replicas");
+        i.value_plain = Some(element("three", "three", 1));
+        generate_component_diagnostics_from_spec(&i, &number, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("number"));
+    }
+
+    #[test]
+    fn test_interpolation_diagnostics() {
+        let content = r"spec:
+  component: [name]
+  inputs:
+    stage:
+---
+job:
+  stage: $[[ inputs.stage ]]
+  script:
+    - echo $[[ inputs.missing ]]
+    - echo $[[ component.name ]] $[[ component.sha ]] $[[ component.nope ]]
+    - echo $[[ inputs.stage | expand_vars | nope ]]
+    - echo $[[ matrix.FOO ]]
+  # $[[ inputs.commented ]]
+";
+
+        let spec = ParsedComponentSpec {
+            inputs: vec![ComponentInput {
+                key: "stage".to_string(),
+                ..Default::default()
+            }],
+            component_context: vec!["name".to_string()],
+        };
+
+        let diagnostics = interpolation_diagnostics(content, &spec);
+        let messages: Vec<(u32, &str)> = diagnostics
+            .iter()
+            .map(|d| (d.range.start.line, d.message.as_str()))
+            .collect();
+
+        assert_eq!(diagnostics.len(), 4, "{messages:#?}");
+        assert!(messages[0].1.contains("`missing`"));
+        assert_eq!(messages[0].0, 8);
+        assert!(messages[1].1.contains("spec:component"));
+        assert!(messages[2].1.contains("Unknown component context"));
+        assert!(messages[3]
+            .1
+            .contains("Unknown interpolation function `nope`"));
+
+        let line = content.lines().nth(8).unwrap();
+        let range = diagnostics[0].range;
+        assert_eq!(
+            &line[range.start.character as usize..range.end.character as usize],
+            "inputs.missing"
+        );
+    }
+
+    #[test]
+    fn test_component_overview() {
+        let component = Component {
+            uri: "gitlab.com/group/project/deploy@1.0.0".to_string(),
+            local_path: "file:///cache/templates/deploy.yml".to_string(),
+            inputs: vec![
+                ComponentInput {
+                    key: "env".to_string(),
+                    description: Some("Target | environment".to_string()),
+                    ..Default::default()
+                },
+                ComponentInput {
+                    key: "stage".to_string(),
+                    default: Some(serde_yaml::Value::String("deploy".to_string())),
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let overview = component_overview(&component);
+        assert!(overview.contains("## Component `deploy`"));
+        assert!(overview.contains("| `env` | string | **required** | Target \\| environment |"));
+        assert!(overview.contains("| `stage` | string | `deploy` |  |"));
     }
 }

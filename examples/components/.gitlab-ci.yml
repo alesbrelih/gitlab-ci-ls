@@ -1,0 +1,18 @@
+# Pipeline of the component project itself. Components of the current project are
+# referenced through $CI_PROJECT_PATH, so the language server reads them from ./templates
+# instead of cloning them.
+stages:
+  - test
+  - deploy
+
+include:
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/lint@$CI_COMMIT_SHA
+  - component: $CI_SERVER_FQDN/$CI_PROJECT_PATH/deploy@$CI_COMMIT_SHA
+    inputs:
+      environment: staging
+      version: v1.2.3
+      replicas: 2
+      dry_run: true
+      extra_args:
+        - --verbose
+        - --timeout=60

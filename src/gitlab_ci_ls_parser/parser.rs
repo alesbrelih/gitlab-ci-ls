@@ -8,10 +8,10 @@ use log::{error, info};
 use lsp_types::{Position, Url};
 
 use super::{
-    fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
+    components, fs_utils, git, parser_utils::ParserUtils, treesitter, Component,
     GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
     GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, NodeDefinition,
-    ParseResults, RuleReference,
+    ParseResults, ParsedComponentSpec, RuleReference,
 };
 
 unsafe impl Sync for ParserImpl {}
@@ -36,6 +36,9 @@ pub trait Parser: Sync {
         rule_name: Option<&str>,
     ) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
+    /// Parses the `spec:` header of a component template (or any file including inputs).
+    /// Returns None when the file doesn't have a `spec:` header.
+    fn get_component_spec(&self, uri: &str, content: &str) -> Option<ParsedComponentSpec>;
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
@@ -329,62 +332,57 @@ impl ParserImpl {
         Some(())
     }
 
+    /// Finds the component template either in the current workspace (components referenced
+    /// through `$CI_PROJECT_PATH`) or in the remote repository.
+    fn find_component_template(
+        &self,
+        component_id: &str,
+        root_uri: &Url,
+    ) -> anyhow::Result<GitlabElement> {
+        if ParserUtils::is_current_project_component(component_id) {
+            let name = ParserUtils::component_name_from_uri(component_id)
+                .ok_or_else(|| anyhow!("invalid component uri: {component_id}"))?;
+            let root = root_uri
+                .to_file_path()
+                .map_err(|()| anyhow!("workspace root is not a local path: {root_uri}"))?;
+
+            return ParserUtils::get_component(root.to_string_lossy().trim_end_matches('/'), name)
+                .map_err(|err| {
+                    anyhow!("could not find local component {name} in workspace; got err: {err}")
+                });
+        }
+
+        let component_id = ParserUtils::expand_variables(component_id, &self.variables);
+        let component_info = ParserUtils::extract_component_from_uri(
+            &component_id,
+            &self.git.get_project_remote_uris(),
+        )
+        .map_err(|err| anyhow!("error extracting component info from uri; got: {err}"))?;
+
+        self.git
+            .fetch_remote_component(component_info.clone())
+            .map_err(|err| {
+                anyhow!("could not find gitlab component: {component_info:?}; got err: {err}")
+            })
+    }
+
     fn parse_component(
         &self,
         parse_results: &mut ParseResults,
         component_id: &str,
+        root_uri: &Url,
     ) -> anyhow::Result<()> {
-        let component_info = match ParserUtils::extract_component_from_uri(
-            component_id,
-            &self.git.get_project_remote_uris(),
-        ) {
-            Ok(c) => c,
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "error extracting component info from uri; got: {err}"
-                ));
-            }
-        };
+        let gitlab_component = self.find_component_template(component_id, root_uri)?;
 
-        let gitlab_component = match self.git.fetch_remote_component(component_info.clone()) {
-            Ok(c) => c,
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "could not find gitlab component: {:?}; got err: {err}",
-                    component_info
-                ));
-            }
-        };
-
-        let p = &gitlab_component.uri["file://".len()..];
-        let spec_content = match std::fs::read_to_string(p) {
-            Ok(s) => s,
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "could not read gitlab component: {:?}, got err: {err}",
-                    p,
-                ));
-            }
-        };
-
-        // TODO: probably it is valid to have no inputs?
-        let Some(spec_inputs) = self.treesitter.get_component_spec_inputs(&spec_content) else {
-            return Err(anyhow::anyhow!("could not get spec inputs from component"));
-        };
-
-        let spec: ComponentSpec = match serde_yaml::from_str(&spec_inputs) {
-            Ok(y) => y,
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "error parsing component spec yaml: {}, got err: {}",
-                    &spec_content,
-                    err
-                ));
-            }
-        };
+        let p = gitlab_component
+            .uri
+            .strip_prefix("file://")
+            .unwrap_or(&gitlab_component.uri);
+        let template_content = std::fs::read_to_string(p)
+            .map_err(|err| anyhow!("could not read gitlab component: {p:?}, got err: {err}"))?;
 
         // Parse job definitions from the component template (content after ---)
-        if let Some(jobs_content) = ParserUtils::get_component_jobs_content(&spec_content) {
+        if let Some(jobs_content) = ParserUtils::get_component_jobs_content(&template_content) {
             parse_results.nodes.append(
                 &mut self
                     .treesitter
@@ -392,24 +390,15 @@ impl ParserImpl {
             );
         }
 
+        // components without `spec:inputs` are valid, they just can't be configured
+        let spec = self
+            .get_component_spec(&gitlab_component.uri, &template_content)
+            .unwrap_or_default();
+
         parse_results.components.push(Component {
             uri: component_id.to_string(),
             local_path: gitlab_component.uri,
-            inputs: spec
-                .spec
-                .inputs
-                .into_iter()
-                .map(|i| crate::gitlab_ci_ls_parser::ComponentInput {
-                    key: i.0,
-                    default: i.1.default,
-                    regex: i.1.regex,
-                    options: i.1.options,
-                    prop_type: i.1.type_,
-                    description: i.1.description,
-
-                    ..Default::default()
-                })
-                .collect(),
+            inputs: spec.inputs,
         });
 
         Ok(())
@@ -432,6 +421,28 @@ impl Parser for ParserImpl {
 
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement> {
         self.treesitter.get_all_components(uri, content)
+    }
+
+    fn get_component_spec(&self, uri: &str, content: &str) -> Option<ParsedComponentSpec> {
+        let spec_yaml = self.treesitter.get_component_spec_inputs(content)?;
+
+        let mut spec = match components::parse_component_spec(&spec_yaml) {
+            Ok(spec) => spec,
+            Err(err) => {
+                error!("error parsing component spec yaml in {uri}; got err: {err}");
+                return None;
+            }
+        };
+
+        let keys = self.treesitter.get_component_spec_input_keys(uri, content);
+        for input in &mut spec.inputs {
+            input.definition_range = keys
+                .iter()
+                .find(|k| k.key == input.key)
+                .map(|k| k.range.clone());
+        }
+
+        Some(spec)
     }
 
     fn get_position_type(&self, content: &str, position: Position) -> PositionType {
@@ -569,7 +580,9 @@ impl Parser for ParserImpl {
                         self.parse_remote_files(parse_results, &remote_files);
                     }
                     IncludeItem::Component(node) => {
-                        if let Err(err) = self.parse_component(parse_results, &node.component) {
+                        if let Err(err) =
+                            self.parse_component(parse_results, &node.component, root_uri)
+                        {
                             error!("error handling component; got err: {err}");
                         }
                     }

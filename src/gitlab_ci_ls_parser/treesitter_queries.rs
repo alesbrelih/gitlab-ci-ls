@@ -772,12 +772,40 @@ impl TreesitterQueries {
                                     (block_node)@component_input_value_block
                                 ]?
                             )*))
-                        )
+                        )?
                     )
                 ) @full_component
             )
             (#eq? @component_include_key "component")
             (#eq? @component_inputs_key "inputs")
+        )
+        "#
+        .to_string()
+    }
+
+    pub fn get_component_spec_input_keys() -> String {
+        r#"
+        (
+            stream(
+                document(
+                    block_node(
+                        block_mapping(
+                            block_mapping_pair
+                            key: (flow_node(plain_scalar(string_scalar)@spec_key))
+                            value: (block_node(block_mapping(
+                                block_mapping_pair
+                                key: (flow_node(plain_scalar(string_scalar)@inputs_key))
+                                value: (block_node(block_mapping(
+                                    block_mapping_pair
+                                    key: (flow_node)@input_key
+                                )))
+                            )))
+                        )
+                    )
+                )
+            )
+            (#eq? @spec_key "spec")
+            (#eq? @inputs_key "inputs")
         )
         "#
         .to_string()

@@ -58,6 +58,7 @@ pub trait Treesitter {
         job_name: &str,
     ) -> Option<GitlabElement>;
     fn get_component_spec_inputs(&self, content: &str) -> Option<String>;
+    fn get_component_spec_input_keys(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -898,21 +899,29 @@ impl Treesitter for TreesitterImpl {
             .unwrap();
 
         let full_component_index = query.capture_index_for_name("full_component").unwrap();
+        let component_inputs_key_index = query
+            .capture_index_for_name("component_inputs_key")
+            .unwrap();
 
-        let mut components = vec![];
+        // Optional `inputs` can produce multiple matches for the same include item
+        // so we keep the most complete one per component.
+        let mut components: Vec<(usize, usize, GitlabComponentElement)> = vec![];
         while let Some(m) = matches.next() {
             let mut node = GitlabComponentElement {
                 uri: uri.to_string(),
                 ..Default::default()
             };
+            let mut full_component_start = 0;
             let mut current_input = None;
             for c in m.captures {
                 let text = content[c.node.byte_range()].to_string();
                 match c.index {
                     idx if idx == component_uri_index => {
-                        node.key = text;
+                        node.key = ParserUtils::strip_quotes(&text).to_string();
+                        node.key_range = get_range(c.node, &text).unwrap_or_default();
                     }
                     idx if idx == full_component_index => {
+                        full_component_start = c.node.start_byte();
                         node.content = Some(text);
                         node.range = Range {
                             start: LSPPosition {
@@ -1003,10 +1012,62 @@ impl Treesitter for TreesitterImpl {
                 node.inputs.push(current);
             }
 
-            components.push(node);
+            let completeness = m
+                .captures
+                .iter()
+                .filter(|c| c.index != component_inputs_key_index)
+                .count();
+
+            match components
+                .iter_mut()
+                .find(|(start, _, _)| *start == full_component_start)
+            {
+                Some(existing) if existing.1 < completeness => {
+                    *existing = (full_component_start, completeness, node);
+                }
+                Some(_) => {}
+                None => components.push((full_component_start, completeness, node)),
+            }
         }
 
-        components
+        components.into_iter().map(|(_, _, c)| c).collect()
+    }
+
+    fn get_component_spec_input_keys(&self, uri: &str, content: &str) -> Vec<GitlabElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::LANGUAGE.into(),
+            &TreesitterQueries::get_component_spec_input_keys(),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+        let input_key_index = query.capture_index_for_name("input_key").unwrap();
+
+        let mut keys = vec![];
+        while let Some(m) = matches.next() {
+            for c in m.captures {
+                if c.index == input_key_index {
+                    let text = &content[c.node.byte_range()];
+                    keys.push(GitlabElement {
+                        key: ParserUtils::strip_quotes(text).to_string(),
+                        content: None,
+                        uri: uri.to_string(),
+                        range: get_range(c.node, text).unwrap_or_default(),
+                    });
+                }
+            }
+        }
+
+        keys
     }
 
     fn get_all_rule_references(
@@ -2416,5 +2477,127 @@ job_one:
             keys.contains(&".another_job"),
             "Expected .another_job in nodes, got: {keys:?}",
         );
+    }
+
+    const COMPONENT_INCLUDES: &str = r#"include:
+  - component: "gitlab.com/group/project/no-inputs@1.0.0"
+  - component: gitlab.com/group/project/with-inputs@1.0.0
+    inputs:
+      stage: test
+      image:
+      tags:
+        - docker
+  - local: other.yml
+"#;
+
+    #[test]
+    fn test_get_all_components() {
+        let treesitter = TreesitterImpl::new();
+        let components = treesitter.get_all_components("file://mocked", COMPONENT_INCLUDES);
+
+        assert_eq!(2, components.len(), "got: {components:#?}");
+
+        let no_inputs = &components[0];
+        assert_eq!("gitlab.com/group/project/no-inputs@1.0.0", no_inputs.key);
+        assert!(no_inputs.inputs.is_empty());
+        assert_eq!(1, no_inputs.key_range.start.line);
+        // range excludes the quotes
+        assert_eq!(16, no_inputs.key_range.start.character);
+
+        let with_inputs = &components[1];
+        assert_eq!(
+            "gitlab.com/group/project/with-inputs@1.0.0",
+            with_inputs.key
+        );
+        let keys: Vec<&str> = with_inputs.inputs.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(vec!["stage", "image", "tags"], keys);
+
+        assert_eq!(
+            Some("test"),
+            with_inputs.inputs[0]
+                .value_plain
+                .as_ref()
+                .map(|v| v.key.as_str())
+        );
+        assert!(with_inputs.inputs[1].value_plain.is_none());
+        assert!(with_inputs.inputs[1].value_block.is_none());
+        assert!(with_inputs.inputs[2].value_block.is_some());
+    }
+
+    #[test]
+    fn test_get_component_spec_input_keys() {
+        let content = r#"spec:
+  component: [name, version]
+  inputs:
+    stage:
+      default: test
+    "image":
+---
+job:
+  stage: $[[ inputs.stage ]]
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let keys = treesitter.get_component_spec_input_keys("file://template.yml", content);
+
+        let names: Vec<&str> = keys.iter().map(|k| k.key.as_str()).collect();
+        assert_eq!(vec!["stage", "image"], names);
+        assert_eq!(3, keys[0].range.start.line);
+        assert_eq!(4, keys[0].range.start.character);
+        assert_eq!(5, keys[1].range.start.line);
+    }
+
+    #[test]
+    fn test_get_position_type_component_input() {
+        let treesitter = TreesitterImpl::new();
+
+        let position_type = treesitter.get_position_type(
+            COMPONENT_INCLUDES,
+            Position {
+                line: 4,
+                character: 8,
+            },
+        );
+
+        let parser::PositionType::Include(IncludeInformation {
+            component: Some(component),
+            ..
+        }) = position_type
+        else {
+            panic!("expected component include, got: {position_type:?}");
+        };
+
+        assert_eq!("gitlab.com/group/project/with-inputs@1.0.0", component.uri);
+        let hovered: Vec<&str> = component
+            .inputs
+            .iter()
+            .filter(|i| i.hovered)
+            .map(|i| i.key.as_str())
+            .collect();
+        assert_eq!(vec!["stage"], hovered);
+    }
+
+    #[test]
+    fn test_get_position_type_component_without_inputs() {
+        let treesitter = TreesitterImpl::new();
+
+        let position_type = treesitter.get_position_type(
+            COMPONENT_INCLUDES,
+            Position {
+                line: 1,
+                character: 30,
+            },
+        );
+
+        let parser::PositionType::Include(IncludeInformation {
+            component: Some(component),
+            ..
+        }) = position_type
+        else {
+            panic!("expected component include, got: {position_type:?}");
+        };
+
+        assert_eq!("gitlab.com/group/project/no-inputs@1.0.0", component.uri);
+        assert!(component.inputs.is_empty());
     }
 }

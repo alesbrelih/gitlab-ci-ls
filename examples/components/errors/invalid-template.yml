@@ -1,0 +1,12 @@
+# Open this file to see the diagnostics reported for interpolation in a component template.
+spec:
+  inputs:
+    stage:
+      default: test
+---
+broken-job:
+  stage: $[[ inputs.stage ]]
+  script:
+    - echo $[[ inputs.typo ]]
+    - echo $[[ component.name ]]
+    - echo $[[ inputs.stage | to_upper ]]

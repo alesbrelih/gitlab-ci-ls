@@ -4,6 +4,9 @@ use lsp_server::RequestId;
 use lsp_types::{Diagnostic, TextEdit, Url};
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[cfg(test)]
+mod component_e2e_tests;
+pub mod components;
 pub mod fs_utils;
 pub mod git;
 pub mod handlers;
@@ -148,6 +151,8 @@ pub struct GitlabComponentElement {
     pub content: Option<String>,
     pub uri: String,
     pub range: Range,
+    // range of the component reference itself (`component: <this>`)
+    pub key_range: Range,
     pub inputs: Vec<GitlabInputElement>,
 }
 
@@ -213,14 +218,14 @@ pub struct NodeDefinition {
 
 #[derive(Debug, Default, Clone)]
 pub struct ComponentInputValuePlain {
-    value: String,
-    hovered: bool,
+    pub value: String,
+    pub hovered: bool,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct ComponentInputValueBlock {
-    value: String,
-    hovered: bool,
+    pub value: String,
+    pub hovered: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -231,49 +236,84 @@ pub struct ComponentInput {
     pub options: Option<Vec<String>>,
     pub regex: Option<String>,
     pub prop_type: Option<String>,
+    // `spec:inputs:<input>:rules` can provide defaults/options conditionally,
+    // so we can't statically decide whether the input is required.
+    pub has_rules: bool,
+    // location of the input key inside the component template `spec:inputs` header
+    pub definition_range: Option<Range>,
     pub hovered: bool,
     pub value_plain: ComponentInputValuePlain,
     pub value_block: ComponentInputValueBlock,
 }
 
 impl ComponentInput {
+    /// Inputs without a default value have to be provided by the caller.
+    pub fn is_required(&self) -> bool {
+        self.default.is_none() && !self.has_rules
+    }
+
+    /// Type of the input; GitLab defaults to `string` when it isn't set.
+    pub fn input_type(&self) -> &str {
+        self.prop_type.as_deref().unwrap_or("string")
+    }
+
+    pub fn default_as_string(&self) -> Option<String> {
+        self.default.as_ref().map(yaml_value_to_inline_string)
+    }
+
     pub fn autocomplete_details(&self) -> String {
         let mut details = String::new();
 
         if let Some(d) = &self.description {
             details = format!(
-                "## Description: 
+                "## Description:
 {d}
 "
             );
         }
 
-        if let Some(d) = &self.prop_type {
-            details = format!(
-                "{}
-## Type: 
+        details = format!(
+            "{}
+## Type:
 {}
 ",
-                details,
-                d.as_str()
-            );
+            details,
+            self.input_type()
+        );
+
+        match self.default_as_string() {
+            Some(d) => {
+                details = format!(
+                    "{details}
+## Default:
+{d}
+"
+                );
+            }
+            None => {
+                details = format!(
+                    "{details}
+## Required
+"
+                );
+            }
         }
 
-        if let Some(d) = &self.default {
+        if let Some(options) = &self.options {
             details = format!(
                 "{}
-## Default: 
+## Options:
 {}
 ",
                 details,
-                d.as_str().unwrap_or_default()
+                options.join(", ")
             );
         }
 
         if let Some(d) = &self.regex {
             details = format!(
                 "{}
-## Regex: 
+## Regex:
 {}
 ",
                 details,
@@ -285,6 +325,20 @@ impl ComponentInput {
     }
 }
 
+/// Renders a YAML value on a single line, e.g. for hover and completion details.
+pub fn yaml_value_to_inline_string(value: &serde_yaml::Value) -> String {
+    match value {
+        serde_yaml::Value::String(s) => s.clone(),
+        serde_yaml::Value::Null => "null".to_string(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| {
+            serde_yaml::to_string(other)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        }),
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Component {
     pub uri: String,
@@ -292,29 +346,76 @@ pub struct Component {
     pub inputs: Vec<ComponentInput>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct ComponentSpecInput {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     default: Option<serde_yaml::Value>, // Can be any type (string, number, boolean)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    options: Option<Vec<serde_yaml::Value>>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     type_: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     regex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rules: Option<serde_yaml::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ComponentSpecInputs {
-    inputs: HashMap<String, ComponentSpecInput>,
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ComponentSpecHeader {
+    // Mapping keeps the declaration order which is nicer for completion and hover.
+    // Values are kept raw because an input without attributes (`my_input:`) is valid
+    // and means a required string input.
+    #[serde(default)]
+    inputs: Option<serde_yaml::Mapping>,
+    // Values that can be used with `$[[ component.<value> ]]` interpolation.
+    #[serde(default)]
+    component: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ComponentSpec {
-    spec: ComponentSpecInputs,
+    #[serde(default)]
+    spec: Option<ComponentSpecHeader>,
 }
+
+/// Parsed `spec:` header of a file that can be included with inputs (components).
+#[derive(Debug, Default, Clone)]
+pub struct ParsedComponentSpec {
+    pub inputs: Vec<ComponentInput>,
+    pub component_context: Vec<String>,
+}
+
+/// Values that can be exposed through `spec:component` and used as `$[[ component.<value> ]]`.
+pub const COMPONENT_CONTEXT_VALUES: [(&str, &str); 4] = [
+    ("name", "The component name."),
+    ("sha", "The commit SHA of the component."),
+    (
+        "version",
+        "The resolved semantic version of the component (empty when not included by version).",
+    ),
+    (
+        "reference",
+        "The original reference used to include the component, e.g. `1.0`, `~latest` or a branch.",
+    ),
+];
+
+/// Functions that can be applied in interpolation blocks, e.g. `$[[ inputs.x | expand_vars ]]`.
+pub const INTERPOLATION_FUNCTIONS: [(&str, &str); 3] = [
+    (
+        "expand_vars",
+        "Expands CI/CD variables referenced in the input value.",
+    ),
+    (
+        "truncate",
+        "`truncate(offset, length)` shortens the input value.",
+    ),
+    (
+        "posix_escape",
+        "Escapes POSIX shell special characters in the input value.",
+    ),
+];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct IncludeNode {
