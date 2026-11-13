@@ -797,4 +797,19 @@ impl TreesitterQueries {
         "#
         .to_string()
     }
+
+    pub fn get_all_scripts() -> String {
+        r#"
+        (
+            block_mapping (
+            block_mapping_pair
+                key: (flow_node (plain_scalar(string_scalar)@script_key))
+                value: (_)@script_value
+            )
+
+            (#any-of? @script_key "script" "before_script" "after_script")
+        ) @script_parent
+        "#
+        .to_string()
+    }
 }

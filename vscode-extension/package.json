@@ -46,6 +46,16 @@
           "default": "~/.cache/gitlab-ci-ls/log/gitlab-ci-ls.log",
           "description": "Log path for the LS."
         },
+        "gitlabLs.shellcheck.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint job scripts with ShellCheck."
+        },
+        "gitlabLs.shellcheck.path": {
+          "type": "string",
+          "default": "shellcheck",
+          "description": "Path to the ShellCheck binary."
+        },
         "gitlabLs.checkForUpdates": {
           "type": "boolean",
           "default": true,

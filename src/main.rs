@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use clap::Parser;
-use gitlab_ci_ls_parser::LSPExperimental;
+use gitlab_ci_ls_parser::{LSPExperimental, ShellcheckConfig};
 use log::{error, info, LevelFilter};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,9 @@ struct InitializationOptions {
 struct Options {
     #[serde(default = "default_dependencies_autocomplete_stage_filtering")]
     dependencies_autocomplete_stage_filtering: bool,
+
+    #[serde(default)]
+    shellcheck: ShellcheckConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -80,6 +83,7 @@ impl InitializationParams {
 fn default_options() -> Options {
     Options {
         dependencies_autocomplete_stage_filtering: false,
+        shellcheck: ShellcheckConfig::default(),
     }
 }
 
@@ -180,6 +184,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                         options: Options {
                             dependencies_autocomplete_stage_filtering:
                                 default_dependencies_autocomplete_stage_filtering(),
+                            shellcheck: ShellcheckConfig::default(),
                         },
                     },
                 }
@@ -229,6 +234,11 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
                     .options
                     .dependencies_autocomplete_stage_filtering,
             },
+            shellcheck: init_params
+                .initialization_options
+                .options
+                .shellcheck
+                .clone(),
         },
         Box::new(fs_utils),
     );

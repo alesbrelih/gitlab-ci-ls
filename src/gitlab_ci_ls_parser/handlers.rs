@@ -18,10 +18,10 @@ use crate::gitlab_ci_ls_parser::{
 use super::{
     fs_utils,
     parser::{self, PositionType},
-    parser_utils, treesitter, CompletionResult, Component, ComponentInput, DefinitionResult,
-    GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult, IncludeInformation,
-    LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range, ReferencesResult,
-    RemoteInclude, RuleReference,
+    parser_utils, shellcheck, treesitter, CompletionResult, Component, ComponentInput,
+    DefinitionResult, GitlabElement, GitlabFileElements, GitlabInputElement, HoverResult,
+    IncludeInformation, LSPCompletion, LSPConfig, LSPLocation, LSPPosition, LSPResult, Range,
+    ReferencesResult, RemoteInclude, RuleReference,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -45,6 +45,7 @@ pub struct LSPHandlers {
     components: Mutex<HashMap<String, Component>>,
     indexing_in_progress: Mutex<bool>,
     parser: Box<dyn parser::Parser>,
+    shellcheck: shellcheck::Shellcheck,
 }
 
 impl LSPHandlers {
@@ -66,6 +67,7 @@ impl LSPHandlers {
             variables,
             components,
             indexing_in_progress,
+            shellcheck: shellcheck::Shellcheck::new(cfg.shellcheck),
             parser: Box::new(parser::ParserImpl::new(
                 cfg.remote_urls,
                 cfg.package_map,
@@ -1546,6 +1548,15 @@ impl LSPHandlers {
             }));
 
         diagnostics.extend(cache_diagnostics);
+
+        let scripts = self.parser.get_all_scripts(content.as_str());
+
+        // releasing locks because shellcheck runs as an external process
+        drop(all_components);
+        drop(all_nodes);
+        drop(store);
+
+        diagnostics.extend(self.shellcheck.diagnostics(&scripts, content.as_str()));
 
         info!("DIAGNOSTICS ELAPSED: {:?}", start.elapsed());
         Some(LSPResult::Diagnostics(DiagnosticsNotification {

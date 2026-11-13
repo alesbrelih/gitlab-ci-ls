@@ -10,6 +10,7 @@ pub mod handlers;
 pub mod messages;
 pub mod parser;
 pub mod parser_utils;
+pub mod shellcheck;
 pub mod treesitter;
 pub mod treesitter_queries;
 
@@ -151,6 +152,32 @@ pub struct GitlabComponentElement {
     pub inputs: Vec<GitlabInputElement>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GitlabScriptKind {
+    Plain,
+    SingleQuoted,
+    DoubleQuoted,
+    Literal,
+    Folded,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitlabScriptItem {
+    // raw scalar as written in yaml (including quotes or block scalar header)
+    pub content: String,
+    pub range: Range,
+    pub kind: GitlabScriptKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitlabScriptElement {
+    pub key: String,
+    // identifies the mapping (job) holding this script so before_script and
+    // script of the same job can be checked together
+    pub job_id: usize,
+    pub items: Vec<GitlabScriptItem>,
+}
+
 #[derive(Debug)]
 pub struct ParseResults {
     pub files: Vec<GitlabFile>,
@@ -165,6 +192,28 @@ pub struct LSPExperimental {
     pub dependencies_autocomplete_stage_filtering: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShellcheckConfig {
+    pub enabled: bool,
+    pub path: String,
+    pub shell: String,
+    pub severity: String,
+    pub exclude: Vec<String>,
+}
+
+impl Default for ShellcheckConfig {
+    fn default() -> Self {
+        ShellcheckConfig {
+            enabled: true,
+            path: "shellcheck".to_string(),
+            shell: "bash".to_string(),
+            severity: "style".to_string(),
+            exclude: vec![],
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LSPConfig {
     pub root_dir: String,
@@ -173,6 +222,7 @@ pub struct LSPConfig {
     pub remote_urls: Vec<String>,
     pub variables: HashMap<String, String>,
     pub experimental: LSPExperimental,
+    pub shellcheck: ShellcheckConfig,
 }
 
 #[derive(Debug)]
