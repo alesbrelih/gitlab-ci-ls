@@ -10,8 +10,8 @@ use lsp_types::{Position, Url};
 use super::{
     fs_utils, git, parser_utils::ParserUtils, treesitter, Component, ComponentSpec,
     GitlabCacheElement, GitlabComponentElement, GitlabElement, GitlabElementWithParentAndLvl,
-    GitlabFile, GitlabFileElements, IncludeInformation, IncludeItem, IncludeNode, NodeDefinition,
-    ParseResults, RuleReference,
+    GitlabFile, GitlabFileElements, GitlabScriptElement, IncludeInformation, IncludeItem,
+    IncludeNode, NodeDefinition, ParseResults, RuleReference,
 };
 
 unsafe impl Sync for ParserImpl {}
@@ -37,6 +37,7 @@ pub trait Parser: Sync {
     ) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
+    fn get_all_scripts(&self, content: &str) -> Vec<GitlabScriptElement>;
     fn get_all_stages(&self, uri: &str, content: &str, stage: Option<&str>) -> Vec<GitlabElement>;
     fn get_position_type(&self, content: &str, position: Position) -> PositionType;
     fn get_root_node(&self, uri: &str, content: &str, node_key: &str) -> Option<GitlabElement>;
@@ -725,6 +726,10 @@ impl Parser for ParserImpl {
 
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement> {
         self.treesitter.get_all_multi_caches(uri, content)
+    }
+
+    fn get_all_scripts(&self, content: &str) -> Vec<GitlabScriptElement> {
+        self.treesitter.get_all_scripts(content)
     }
 
     fn get_root_node_at_position(

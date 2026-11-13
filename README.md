@@ -17,6 +17,7 @@ It is intended to be used alongside `yaml-language-server` (yamlls), providing s
 - **Autocompletion**: Suggestions for `extends`, `stages`, `needs`, `variables`, `included projects files` and `components`.
 - **Hover Information**: View documentation for job with merged definitions.
 - **Diagnostics**: Identifies issues with `extends` references, `stage` definitions, `job needs` usage and `components`.
+- **ShellCheck**: Lints `script`, `before_script` and `after_script` with [ShellCheck](https://www.shellcheck.net) when it is installed.
 - **Rename**: Supports job renaming.
 
 It also supports jump to included files. In case it is a remote file it tries to downloading using
@@ -56,6 +57,25 @@ Initialization options:
 
 - **options**:
   - **dependencies_autocomplete_stage_filtering**: Items in dependencies options has to be from previous or current stage. This opption enables dependencies autocomplete result filtering by job stages. It is currently set as opt-in because it takes a longer time (cca 800ms on test repo - medium size) when stages aren't defined in root job because language server needs to first build whole job definition (merging extends) before it can check if job is a valid one. Defaults to `false`
+  - **shellcheck**: Runs [ShellCheck](https://www.shellcheck.net) on `script`, `before_script` and `after_script` and reports its findings as diagnostics. `before_script` and `script` of a job are checked as one script, `after_script` on its own. `!reference` tags and aliases are skipped. If the binary can't be started the check is turned off.
+    - **enabled**: Defaults to `true`
+    - **path**: Path to the ShellCheck binary. Defaults to `shellcheck`
+    - **shell**: Shell dialect passed as `--shell`. Defaults to `bash`
+    - **severity**: Minimum severity passed as `--severity` (`error`, `warning`, `info`, `style`). Defaults to `style`
+    - **exclude**: List of codes to ignore, for example `["SC2086"]`. Defaults to `[]`
+
+    Only the opened file is checked, so variables set in an inherited (`extends`) or global `before_script` are unknown to ShellCheck. Add `SC2154` to `exclude` if that is noisy.
+
+    ```json
+    {
+      "options": {
+        "shellcheck": {
+          "shell": "sh",
+          "exclude": ["SC2086"]
+        }
+      }
+    }
+    ```
 
 ## Project-level Configuration (`.gitlab-ci-ls.yml`)
 

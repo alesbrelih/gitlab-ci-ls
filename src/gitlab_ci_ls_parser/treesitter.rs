@@ -6,8 +6,9 @@ use tree_sitter::{Node, Query, QueryCursor};
 use super::{
     parser, parser_utils::ParserUtils, treesitter_queries::TreesitterQueries, Component,
     ComponentInput, ComponentInputValueBlock, ComponentInputValuePlain, GitlabCacheElement,
-    GitlabComponentElement, GitlabElement, GitlabInputElement, Include, IncludeInformation,
-    LSPPosition, NodeDefinition, Range, RemoteInclude, RuleReference,
+    GitlabComponentElement, GitlabElement, GitlabInputElement, GitlabScriptElement,
+    GitlabScriptItem, GitlabScriptKind, Include, IncludeInformation, LSPPosition, NodeDefinition,
+    Range, RemoteInclude, RuleReference,
 };
 use mockall::{automock, predicate::str};
 
@@ -23,6 +24,7 @@ pub trait Treesitter {
     fn get_stage_definitions(&self, uri: &str, content: &str) -> Vec<GitlabElement>;
     fn get_all_components(&self, uri: &str, content: &str) -> Vec<GitlabComponentElement>;
     fn get_all_multi_caches(&self, uri: &str, content: &str) -> Vec<GitlabCacheElement>;
+    fn get_all_scripts(&self, content: &str) -> Vec<GitlabScriptElement>;
     fn get_all_stages<'a>(
         &self,
         uri: &'a str,
@@ -1189,6 +1191,124 @@ impl Treesitter for TreesitterImpl {
 
         components
     }
+
+    fn get_all_scripts(&self, content: &str) -> Vec<GitlabScriptElement> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_yaml::LANGUAGE.into())
+            .expect("Error loading YAML grammar");
+
+        let tree = parser.parse(content, None).unwrap();
+        let root_node = tree.root_node();
+
+        let query = Query::new(
+            &tree_sitter_yaml::LANGUAGE.into(),
+            &TreesitterQueries::get_all_scripts(),
+        )
+        .unwrap();
+
+        let mut cursor_qry = QueryCursor::new();
+        let mut matches = cursor_qry.matches(&query, root_node, content.as_bytes());
+
+        let script_key = query.capture_index_for_name("script_key").unwrap();
+        let script_value = query.capture_index_for_name("script_value").unwrap();
+        let script_parent = query.capture_index_for_name("script_parent").unwrap();
+
+        let mut scripts = vec![];
+        while let Some(m) = matches.next() {
+            let mut script = GitlabScriptElement {
+                key: String::new(),
+                job_id: 0,
+                items: vec![],
+            };
+
+            for c in m.captures {
+                match c.index {
+                    idx if idx == script_key => {
+                        script.key = content[c.node.byte_range()].to_string();
+                    }
+                    idx if idx == script_value => {
+                        script.items = get_script_items(c.node, content);
+                    }
+                    idx if idx == script_parent => {
+                        script.job_id = c.node.id();
+                    }
+                    _ => {}
+                }
+            }
+
+            scripts.push(script);
+        }
+
+        scripts
+    }
+}
+
+// Script can be a single scalar or a list of scalars.
+fn get_script_items(value: Node<'_>, content: &str) -> Vec<GitlabScriptItem> {
+    let mut cursor = value.walk();
+    let sequence = value
+        .named_children(&mut cursor)
+        .find(|n| n.kind() == "block_sequence");
+
+    let Some(sequence) = sequence else {
+        return get_script_item(value, content).into_iter().collect();
+    };
+
+    let mut items = vec![];
+    let mut cursor = sequence.walk();
+    for sequence_item in sequence.named_children(&mut cursor) {
+        let mut item_cursor = sequence_item.walk();
+        let node = sequence_item
+            .named_children(&mut item_cursor)
+            .find(|n| matches!(n.kind(), "flow_node" | "block_node"));
+
+        if let Some(item) = node.and_then(|n| get_script_item(n, content)) {
+            items.push(item);
+        }
+    }
+
+    items
+}
+
+// Items that aren't plain shell (!reference tags, aliases, nested lists) are skipped.
+fn get_script_item(node: Node<'_>, content: &str) -> Option<GitlabScriptItem> {
+    let mut cursor = node.walk();
+    let mut scalar = None;
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "tag" | "alias" => return None,
+            "plain_scalar" | "single_quote_scalar" | "double_quote_scalar" | "block_scalar" => {
+                scalar = Some(child);
+            }
+            _ => {}
+        }
+    }
+
+    let scalar = scalar?;
+    let text = &content[scalar.byte_range()];
+    let kind = match scalar.kind() {
+        "plain_scalar" => GitlabScriptKind::Plain,
+        "single_quote_scalar" => GitlabScriptKind::SingleQuoted,
+        "double_quote_scalar" => GitlabScriptKind::DoubleQuoted,
+        _ if text.starts_with('>') => GitlabScriptKind::Folded,
+        _ => GitlabScriptKind::Literal,
+    };
+
+    Some(GitlabScriptItem {
+        content: text.to_string(),
+        range: Range {
+            start: LSPPosition {
+                line: u32::try_from(scalar.start_position().row).ok()?,
+                character: u32::try_from(scalar.start_position().column).ok()?,
+            },
+            end: LSPPosition {
+                line: u32::try_from(scalar.end_position().row).ok()?,
+                character: u32::try_from(scalar.end_position().column).ok()?,
+            },
+        },
+        kind,
+    })
 }
 
 fn get_range(node: Node<'_>, text: &str) -> anyhow::Result<Range> {
@@ -2388,6 +2508,52 @@ job_one:
 
         assert_eq!(1, all_multi_caches.len());
         assert_eq!(2, all_multi_caches[0].cache_items.len());
+    }
+
+    #[test]
+    fn test_get_all_scripts() {
+        let cnt = r#"
+job_one:
+  before_script: echo before
+  script:
+    - echo plain
+    - "echo double"
+    - 'echo single'
+    - |
+      echo literal
+    - >
+      echo folded
+    - !reference [.other, script]
+    - *anchor
+  after_script:
+    - echo after
+"#;
+
+        let treesitter = TreesitterImpl::new();
+        let scripts = treesitter.get_all_scripts(cnt);
+
+        assert_eq!(3, scripts.len());
+        assert!(scripts.iter().all(|s| s.job_id == scripts[0].job_id));
+
+        let script = scripts.iter().find(|s| s.key == "script").unwrap();
+        let kinds: Vec<GitlabScriptKind> = script.items.iter().map(|i| i.kind).collect();
+        assert_eq!(
+            vec![
+                GitlabScriptKind::Plain,
+                GitlabScriptKind::DoubleQuoted,
+                GitlabScriptKind::SingleQuoted,
+                GitlabScriptKind::Literal,
+                GitlabScriptKind::Folded,
+            ],
+            kinds
+        );
+        assert_eq!("echo plain", script.items[0].content);
+        assert_eq!(4, script.items[0].range.start.line);
+        assert_eq!(6, script.items[0].range.start.character);
+
+        let before = scripts.iter().find(|s| s.key == "before_script").unwrap();
+        assert_eq!(1, before.items.len());
+        assert_eq!("echo before", before.items[0].content);
     }
 
     #[test]
